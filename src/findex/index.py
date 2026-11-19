@@ -2,7 +2,6 @@
 import json
 import pickle
 import numpy as np
-from dataclasses import dataclass
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple
 from pathlib import Path
@@ -11,13 +10,7 @@ import concurrent.futures
 
 from findex.corpus import iter_documents
 from findex.tokenize import tokenize_text
-
-
-@dataclass(frozen=True, slots=True)
-class DocMeta:
-    doc_id: int
-    filename: str
-    length: int
+from findex.models import DocMeta
 
 
 class InvertedIndex:

@@ -374,3 +374,31 @@ def test_build_index_parallel_invalid_executor(tmp_path):
             workers=1,
             executor_type="invalid"
         )
+
+
+def test_build_index_parallel_processes(tmp_path):
+    (tmp_path / "doc1.txt").write_text(
+        "apple banana", encoding="utf-8"
+    )
+    (tmp_path / "doc2.txt").write_text(
+        "banana orange", encoding="utf-8"
+    )
+    (tmp_path / "doc3.txt").write_text(
+        "orange apple", encoding="utf-8"
+    )
+
+    idx = build_index_parallel(
+        str(tmp_path),
+        workers=2,
+        executor_type="processes"
+    )
+
+    assert idx.num_docs == 3
+    assert set(idx.index) == {
+        "apple", "banana", "orange"
+    }
+
+    np.testing.assert_array_equal(
+        idx.index["apple"]["doc_ids"],
+        np.array([1, 3], dtype=np.int32)
+    )

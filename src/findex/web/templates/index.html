@@ -1,0 +1,159 @@
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Findex Search Engine</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 850px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background: #f4f4f9;
+            color: #333;
+        }
+
+        h1 {
+            color: #26354d;
+        }
+
+        form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            min-width: 0;
+            padding: 12px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            padding: 12px 22px;
+            font-size: 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .result-item {
+            background: white;
+            padding: 18px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.08);
+        }
+
+        .result-item a {
+            color: #007bff;
+            font-size: 18px;
+            font-weight: bold;
+            text-decoration: none;
+        }
+
+        .result-item a:hover {
+            text-decoration: underline;
+        }
+
+        .score {
+            color: #666;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        #message {
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🔍 Findex Web Search</h1>
+
+    <form id="searchForm">
+        <input
+            type="text"
+            id="query"
+            name="q"
+            placeholder="Введіть пошуковий запит..."
+            required
+        >
+        <button type="submit">Шукати</button>
+    </form>
+
+    <div id="message"></div>
+    <div id="results"></div>
+
+    <script>
+        const form = document.getElementById("searchForm");
+        const message = document.getElementById("message");
+        const results = document.getElementById("results");
+
+        form.addEventListener("submit", async function(event) {
+            event.preventDefault();
+
+            const query = document.getElementById("query").value.trim();
+
+            if (!query) return;
+
+            message.textContent = "Виконується пошук...";
+            results.innerHTML = "";
+
+            try {
+                const response = await fetch(
+                    "/search?q=" + encodeURIComponent(query) +
+                    "&k=5&scorer_name=bm25&page=1"
+                );
+
+                if (!response.ok) {
+                    throw new Error("Помилка сервера: " + response.status);
+                }
+
+                const data = await response.json();
+
+                if (!data.results || data.results.length === 0) {
+                    message.textContent = "Документів не знайдено.";
+                    return;
+                }
+
+                message.textContent =
+                    "Знайдено результатів: " + data.results.length;
+
+                data.results.forEach(function(item) {
+                    const div = document.createElement("div");
+                    div.className = "result-item";
+
+                    const link = document.createElement("a");
+                    link.href = "/docs/" + encodeURIComponent(item.doc_id);
+                    link.textContent = item.filename;
+
+                    const score = document.createElement("div");
+                    score.className = "score";
+                    score.textContent =
+                        "Релевантність (BM25): " + item.score;
+
+                    div.appendChild(link);
+                    div.appendChild(score);
+                    results.appendChild(div);
+                });
+
+            } catch (error) {
+                message.textContent = "Помилка пошуку: " + error.message;
+            }
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,39 @@
+
+[project]
+name = "findex"
+version = "0.8.0"
+description = "Search engine CLI tool"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "jinja2",
+    "numpy",
+    "httpx>=0.28.1",
+    "selectolax>=1.0.2",
+]
+
+[project.scripts]
+findex = "findex.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=4.1.0",
+    "hypothesis>=6.0.0",
+    "pyright>=1.1.0",
+    "ruff>=0.16.8",
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["src"]

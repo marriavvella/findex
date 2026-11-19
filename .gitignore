@@ -1,0 +1,27 @@
+# Віртуальне середовище
+.venv/
+venv/
+
+# Корпус документів
+data/
+
+# Кеш Python
+__pycache__/
+*.py[cod]
+
+# Кеш тестування
+.pytest_cache/
+.ruff_cache/
+.pyright/
+
+# Тимчасові файли
+*.log
+.env
+
+# Згенеровані індекси
+*.pkl
+*.bin
+
+# Системні файли
+.DS_Store
+Thumbs.db

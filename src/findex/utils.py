@@ -1,40 +1,33 @@
 
-import time
 import functools
-import weakref
+import logging
 import re
-
+import time
+import weakref
 from collections.abc import Callable, Sequence
-from typing import ParamSpec, TypeVar
+from typing import Protocol
 
 from findex.index import Index
 from findex.query_parser import parse_query
 
-
-# Типи для декоратора, який зберігає сигнатуру функції.
-P = ParamSpec("P")
-R = TypeVar("R")
+logger = logging.getLogger(__name__)
 
 
-def timed(
-    func: Callable[P, R]
-) -> Callable[P, R]:
+def timed[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Декоратор для вимірювання часу виконання функції."""
 
     @functools.wraps(func)
-    def wrapper(
-        *args: P.args,
-        **kwargs: P.kwargs
-    ) -> R:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         t0 = time.perf_counter()
 
         result = func(*args, **kwargs)
 
         elapsed = (time.perf_counter() - t0) * 1000
 
-        print(
-            f"[LOG @timed] {func.__name__} "
-            f"executed in {elapsed:.3f} ms"
+        logger.debug(
+            "[LOG @timed] %s executed in %.3f ms",
+            func.__name__,
+            elapsed,
         )
 
         return result
@@ -42,14 +35,27 @@ def timed(
     return wrapper
 
 
-# Тип функції пошуку з LRU-кешем.
-SearchCache = Callable[[str], tuple[int, ...]]
+class CacheInfo(Protocol):
+    """Інтерфейс статистики LRU-кешу."""
 
-# Кеші прив'язані до окремих об'єктів індексу.
-# WeakKeyDictionary не утримує непотрібні індекси.
+    @property
+    def hits(self) -> int:
+        ...
+
+
+class SearchCache(Protocol):
+    """Інтерфейс функції пошуку з LRU-кешем."""
+
+    def __call__(self, query_str: str) -> tuple[int, ...]:
+        ...
+
+    def cache_info(self) -> CacheInfo:
+        ...
+
+
 _search_cache: weakref.WeakKeyDictionary[
     Index,
-    tuple[object, SearchCache]
+    tuple[object, SearchCache],
 ] = weakref.WeakKeyDictionary()
 
 CACHE_SIZE = 256
@@ -63,9 +69,7 @@ def _create_cache(index: Index) -> SearchCache:
     утримувати об'єкт індексу в пам'яті.
     """
 
-    index_ref: weakref.ReferenceType[Index] = (
-        weakref.ref(index)
-    )
+    index_ref: weakref.ReferenceType[Index] = weakref.ref(index)
 
     @functools.lru_cache(maxsize=CACHE_SIZE)
     def search(query_str: str) -> tuple[int, ...]:
@@ -76,16 +80,14 @@ def _create_cache(index: Index) -> SearchCache:
 
         ast_root = parse_query(query_str)
 
-        return tuple(
-            sorted(ast_root.evaluate(current_index))
-        )
+        return tuple(sorted(ast_root.evaluate(current_index)))
 
     return search
 
 
 def cached_search_ids(
     index: Index,
-    query_str: str
+    query_str: str,
 ) -> list[int]:
     """
     Повертає ID документів із використанням LRU-кешу.
@@ -95,7 +97,6 @@ def cached_search_ids(
     """
 
     index_version = index.index
-
     state = _search_cache.get(index)
 
     if state is None or state[0] is not index_version:
@@ -103,26 +104,21 @@ def cached_search_ids(
 
         _search_cache[index] = (
             index_version,
-            search
+            search,
         )
     else:
         search = state[1]
 
-    # Для типізованої функції Callable метод cache_info()
-    # не визначений. Використовуємо cache_info через
-    # окремий протокол нижче.
-    cache_info = getattr(search, "cache_info")
-
-    hits_before: int = cache_info().hits
+    hits_before = search.cache_info().hits
 
     doc_ids = search(query_str)
 
-    hits_after: int = cache_info().hits
+    hits_after = search.cache_info().hits
 
     if hits_after > hits_before:
-        print(f"[CACHE HIT] {query_str}")
+        logger.debug("[CACHE HIT] %s", query_str)
     else:
-        print(f"[CACHE MISS] {query_str}")
+        logger.debug("[CACHE MISS] %s", query_str)
 
     return list(doc_ids)
 
@@ -130,7 +126,7 @@ def cached_search_ids(
 def generate_snippet(
     text: str,
     query_terms: Sequence[str],
-    window: int = 80
+    window: int = 80,
 ) -> str:
     """
     Створює фрагмент документа навколо знайденого слова.
@@ -147,7 +143,6 @@ def generate_snippet(
             "window must be greater than zero"
         )
 
-    # Видаляємо порожні та повторювані терміни.
     terms: list[str] = list(
         dict.fromkeys(
             term.strip()
@@ -156,7 +151,6 @@ def generate_snippet(
         )
     )
 
-    # Якщо термінів немає, повертаємо початок тексту.
     if not terms:
         snippet = text[:window * 2]
 
@@ -165,14 +159,12 @@ def generate_snippet(
 
         return snippet
 
-    # Формуємо регулярний вираз для пошуку цілих слів.
-    # Довші терміни перевіряємо першими.
     escaped_terms: list[str] = [
         re.escape(term)
         for term in sorted(
             terms,
             key=len,
-            reverse=True
+            reverse=True,
         )
     ]
 
@@ -180,10 +172,9 @@ def generate_snippet(
         r"(?<!\w)(?:"
         + "|".join(escaped_terms)
         + r")(?!\w)",
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
 
-    # Знаходимо перший збіг у документі.
     match = pattern.search(text)
 
     if match is None:
@@ -194,26 +185,23 @@ def generate_snippet(
 
         return snippet
 
-    # Визначаємо межі фрагмента навколо збігу.
     start = max(
         0,
-        match.start() - window
+        match.start() - window,
     )
 
     end = min(
         len(text),
-        match.end() + window
+        match.end() + window,
     )
 
     snippet = text[start:end]
 
-    # Підсвічуємо всі цілі слова у фрагменті.
     highlighted = pattern.sub(
         lambda found: f"**{found.group(0)}**",
-        snippet
+        snippet,
     )
 
-    # Позначаємо пропущений текст.
     if start > 0:
         highlighted = "..." + highlighted
 

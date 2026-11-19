@@ -4,10 +4,10 @@ import pytest
 
 from findex.index import (
     InvertedIndex,
-    open_index,
+    build_index_parallel,
     build_partial,
     merge,
-    build_index_parallel,
+    open_index,
 )
 from findex.models import DocMeta
 
@@ -115,9 +115,8 @@ def test_index_context_manager():
 def test_index_context_manager_does_not_suppress_errors():
     idx = InvertedIndex()
 
-    with pytest.raises(ValueError):
-        with idx:
-            raise ValueError("Test exception")
+    with pytest.raises(ValueError), idx:
+        raise ValueError("Test exception")
 
 
 # Перевірка статистики індексу

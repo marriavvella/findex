@@ -2,27 +2,27 @@
 import argparse
 import tracemalloc
 
-from findex.index import open_index, Index
+from findex.index import Index, open_index
+from findex.models import SearchResult
 from findex.query_parser import (
-    ASTNode,
-    parse_query,
-    Term,
-    Phrase,
     And,
-    Or,
+    ASTNode,
     Not,
+    Or,
+    Phrase,
+    Term,
+    parse_query,
 )
 from findex.scoring import (
     BM25Scorer,
-    TfIdfScorer,
     Scorer,
+    TfIdfScorer,
 )
 from findex.utils import (
-    timed,
-    generate_snippet,
     cached_search_ids,
+    generate_snippet,
+    timed,
 )
-from findex.models import SearchResult
 
 
 def extract_query_terms(node: ASTNode) -> list[str]:

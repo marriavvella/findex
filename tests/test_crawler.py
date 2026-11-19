@@ -1,6 +1,5 @@
 
 import pytest
-import httpx
 
 from findex import crawler
 

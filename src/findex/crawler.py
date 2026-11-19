@@ -10,7 +10,6 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
-
 logger = logging.getLogger("findex.crawler")
 
 
@@ -43,20 +42,38 @@ class RobotsCache:
         base = f"{parsed.scheme}://{parsed.netloc}"
 
         if base in self._cache:
-            return self._check_txt(self._cache[base], parsed.path)
+            return self._check_txt(
+                self._cache[base],
+                parsed.path,
+            )
 
         robots_url = f"{base}/robots.txt"
 
         try:
-            resp = await client.get(robots_url, timeout=5.0)
+            resp = await client.get(
+                robots_url,
+                timeout=5.0,
+            )
 
             if resp.status_code == 200:
                 txt = resp.text
                 self._cache[base] = txt
-                return self._check_txt(txt, parsed.path)
 
-        except Exception:
-            pass
+                return self._check_txt(
+                    txt,
+                    parsed.path,
+                )
+
+        except (
+            httpx.HTTPError,
+            TimeoutError,
+            RuntimeError,
+        ) as exc:
+            logger.warning(
+                "Could not retrieve robots.txt from %s: %s",
+                robots_url,
+                exc,
+            )
 
         return True
 
@@ -65,15 +82,23 @@ class RobotsCache:
             line = line.strip()
 
             if line.lower().startswith("disallow:"):
-                disallow_path = line.split(":", 1)[1].strip()
+                disallow_path = line.split(
+                    ":",
+                    1,
+                )[1].strip()
 
-                if disallow_path and path.startswith(disallow_path):
+                if disallow_path and path.startswith(
+                    disallow_path
+                ):
                     return False
 
         return True
 
 
-def canonicalize_url(base_url: str, href: str) -> str | None:
+def canonicalize_url(
+    base_url: str,
+    href: str,
+) -> str | None:
     try:
         joined = urljoin(base_url, href)
         parsed = urlparse(joined)
@@ -92,7 +117,13 @@ def canonicalize_url(base_url: str, href: str) -> str | None:
 
         return urlunparse(clean)
 
-    except Exception:
+    except ValueError as exc:
+        logger.debug(
+            "Invalid URL: base=%s, href=%s, error=%s",
+            base_url,
+            href,
+            exc,
+        )
         return None
 
 
@@ -118,37 +149,51 @@ async def fetch_page(
 
                 duration = time.perf_counter() - t0
 
-                if resp.status_code in (429, 500, 502, 503, 504):
-                    if attempt < retries:
-                        retry_after = resp.headers.get("Retry-After")
+                if (
+                    resp.status_code in (429, 500, 502, 503, 504)
+                    and attempt < retries
+                ):
+                    retry_after = resp.headers.get(
+                        "Retry-After"
+                    )
 
-                        sleep_time = (
-                            float(retry_after)
-                            if retry_after and retry_after.isdigit()
-                            else delay + random.uniform(0, 0.5)
-                        )
+                    sleep_time = (
+                        float(retry_after)
+                        if retry_after and retry_after.isdigit()
+                        else delay + random.uniform(0, 0.5)
+                    )
 
-                        logger.warning(
-                            "Status %s for %s. Retrying in %.2fs...",
-                            resp.status_code,
-                            url,
-                            sleep_time,
-                        )
+                    logger.warning(
+                        "Status %s for %s. Retrying in %.2fs...",
+                        resp.status_code,
+                        url,
+                        sleep_time,
+                    )
 
-                        await asyncio.sleep(sleep_time)
-                        delay *= 2
-                        continue
+                    await asyncio.sleep(sleep_time)
+                    delay *= 2
+                    continue
 
                 return {
                     "url": url,
                     "status": resp.status_code,
-                    "html": resp.text if resp.status_code == 200 else "",
+                    "html": (
+                        resp.text
+                        if resp.status_code == 200
+                        else ""
+                    ),
                     "duration": duration,
                     "error": None,
                 }
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if attempt == retries:
+                logger.warning(
+                    "Timeout while fetching %s after %s attempts",
+                    url,
+                    retries + 1,
+                )
+
                 return {
                     "url": url,
                     "status": 0,
@@ -157,7 +202,16 @@ async def fetch_page(
                     "error": "TimeoutError",
                 }
 
-        except Exception as exc:
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "HTTP error while fetching %s "
+                "(attempt %s/%s): %s",
+                url,
+                attempt + 1,
+                retries + 1,
+                exc,
+            )
+
             if attempt == retries:
                 return {
                     "url": url,
@@ -167,7 +221,9 @@ async def fetch_page(
                     "error": str(exc),
                 }
 
-        await asyncio.sleep(delay + random.uniform(0, 0.5))
+        await asyncio.sleep(
+            delay + random.uniform(0, 0.5)
+        )
         delay *= 2
 
     return {
@@ -251,7 +307,10 @@ async def crawl_site(
                     href = node.attributes.get("href")
 
                     if href:
-                        canon = canonicalize_url(url, href)
+                        canon = canonicalize_url(
+                            url,
+                            href,
+                        )
 
                         if canon and canon not in seen:
                             seen.add(canon)

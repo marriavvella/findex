@@ -1,14 +1,14 @@
 
 from pathlib import Path
 
+from findex.index import InvertedIndex
 from findex.query_parser import (
-    parse_query,
-    Term,
-    Phrase,
     And,
     Or,
+    Phrase,
+    Term,
+    parse_query,
 )
-from findex.index import InvertedIndex
 
 
 def test_ast_parsing():

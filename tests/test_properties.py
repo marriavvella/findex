@@ -1,7 +1,8 @@
 
 import unicodedata
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from findex.tokenize import tokenize
 

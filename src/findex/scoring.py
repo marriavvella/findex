@@ -1,7 +1,9 @@
 
-import math
 import heapq
-from typing import Protocol, List, Dict, Sequence, Literal
+import math
+from collections.abc import Sequence
+from typing import Literal, Protocol
+
 from findex.index import Index
 from findex.models import SearchResult
 
@@ -14,7 +16,7 @@ class Scorer(Protocol):
         index: Index,
         query_terms: Sequence[str],
         matching_docs: Sequence[int],
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         ...
 
 
@@ -24,9 +26,9 @@ class TfIdfScorer:
         index: Index,
         query_terms: Sequence[str],
         matching_docs: Sequence[int],
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
 
-        scores: Dict[int, float] = {
+        scores: dict[int, float] = {
             int(doc_id): 0.0 for doc_id in matching_docs
         }
 
@@ -90,9 +92,9 @@ class BM25Scorer:
         index: Index,
         query_terms: Sequence[str],
         matching_docs: Sequence[int],
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
 
-        scores: Dict[int, float] = {
+        scores: dict[int, float] = {
             int(doc_id): 0.0 for doc_id in matching_docs
         }
 

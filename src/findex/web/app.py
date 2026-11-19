@@ -1,18 +1,17 @@
 
-import uuid
 import logging
-
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
 from fastapi import (
-    FastAPI,
-    Request,
-    Query,
-    HTTPException,
     Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
 )
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -20,12 +19,11 @@ from fastapi.templating import Jinja2Templates
 from findex.index import InvertedIndex
 from findex.scoring import (
     BM25Scorer,
-    TfIdfScorer,
     Scorer,
+    TfIdfScorer,
 )
 from findex.search import execute_search
 from findex.web.config import settings
-
 
 logger = logging.getLogger("findex.web")
 
@@ -143,11 +141,9 @@ async def search(
     except Exception as exc:
         req_id = uuid.uuid4()
 
-        logger.error(
-            "Req ID %s: %s",
+        logger.exception(
+            "Search request failed. Req ID: %s",
             req_id,
-            exc,
-            exc_info=True,
         )
 
         raise HTTPException(

@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 
 from findex.index import open_index
-from findex.search import execute_search
 from findex.scoring import BM25Scorer, TfIdfScorer
-
+from findex.search import execute_search
 
 INDEX_PATH = "index.pkl"
 TOP_K = 5
@@ -141,12 +140,10 @@ def collect_judgments(index, queries):
                 break
 
             try:
-                relevant_ids = sorted(
-                    set(
-                        int(value)
-                        for value in answer.split()
-                    )
-                )
+                relevant_ids = sorted({
+                    int(value)
+                    for value in answer.split()
+                })
             except ValueError:
                 print(
                     "Помилка: введи номери "

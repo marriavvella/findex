@@ -2,8 +2,8 @@
 import pytest
 
 from findex.index import InvertedIndex
-from findex.search import execute_search
 from findex.scoring import BM25Scorer, TfIdfScorer
+from findex.search import execute_search
 
 
 @pytest.fixture

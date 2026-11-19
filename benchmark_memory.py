@@ -1,6 +1,7 @@
 
-import sys
 import array
+import sys
+
 import numpy as np
 
 

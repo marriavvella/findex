@@ -1,12 +1,12 @@
-from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
 import array
+from dataclasses import dataclass, field
+
 
 @dataclass(frozen=True, slots=True)
 class Posting:
     doc_id: int
     tf: int
-    positions: Optional[Tuple[int, ...]] = None
+    positions: tuple[int, ...] | None = None
 
 @dataclass(frozen=True, slots=True)
 class DocMeta:
@@ -23,7 +23,7 @@ class CompactPostingStorage:
         self.data.append(doc_id)
         self.data.append(tf)
 
-    def to_list(self) -> List[Tuple[int, int]]:
+    def to_list(self) -> list[tuple[int, int]]:
         return [(self.data[i], self.data[i+1]) for i in range(0, len(self.data), 2)]
 
 # --- НОВИЙ КЛАС ДЛЯ ЛАБ 3 ---

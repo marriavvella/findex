@@ -37,3 +37,10 @@ dev = [
 [tool.pyright]
 typeCheckingMode = "strict"
 include = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+"src/findex/cli.py" = ["B008"]
+"src/findex/web/app.py" = ["B008"]

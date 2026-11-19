@@ -1,5 +1,6 @@
 
 from pathlib import Path
+
 from findex.index import build_index_parallel
 
 corpus_dir = Path("data")

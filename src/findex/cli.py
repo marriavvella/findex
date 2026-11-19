@@ -181,38 +181,59 @@ def crawl(
     )
 
     async def run() -> None:
-        with open(out_jsonl, "w", encoding="utf-8") as f:
-            t0 = time.perf_counter()
+        t0 = time.perf_counter()
 
-            async for page in crawl_site(
-                start_url,
-                max_pages=max_pages,
-                concurrency=concurrency,
-            ):
-                f.write(
-                    json.dumps(
-                        {
-                            "doc_id": page["doc_id"],
-                            "filename": page["url"],
-                            "text": page["html"],
-                        },
-                        ensure_ascii=False,
-                    ) + "\n"
-                )
-
-                console.print(
-                    f"[{page['doc_id']}/{max_pages}] "
-                    f"Collected: {page['url']}"
-                )
-
-            elapsed = time.perf_counter() - t0
-            console.print(
-                f"[bold green]Crawled successfully "
-                f"in {elapsed:.2f}s. "
-                f"Saved to {out_jsonl}[/bold green]"
+        async def write_line(line: str) -> None:
+            await asyncio.to_thread(
+                append_line,
+                out_jsonl,
+                line,
             )
 
+        # Створюємо або очищуємо файл перед початком збору.
+        await asyncio.to_thread(
+            out_jsonl.write_text,
+            "",
+            encoding="utf-8",
+        )
+
+        async for page in crawl_site(
+            start_url,
+            max_pages=max_pages,
+            concurrency=concurrency,
+        ):
+            line = json.dumps(
+                {
+                    "doc_id": page["doc_id"],
+                    "filename": page["url"],
+                    "text": page["html"],
+                },
+                ensure_ascii=False,
+            ) + "\n"
+
+            await write_line(line)
+
+            console.print(
+                f"[{page['doc_id']}/{max_pages}] "
+                f"Collected: {page['url']}"
+            )
+
+        elapsed = time.perf_counter() - t0
+
+        console.print(
+            f"[bold green]Crawled successfully "
+            f"in {elapsed:.2f}s. "
+            f"Saved to {out_jsonl}[/bold green]"
+        )
+
     asyncio.run(run())
+
+
+def append_line(path: Path, line: str) -> None:
+    """Додає один JSONL-запис до файлу."""
+
+    with path.open("a", encoding="utf-8") as file:
+        file.write(line)
 
 
 @app.command()

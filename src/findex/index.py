@@ -1,24 +1,24 @@
 
+import concurrent.futures
 import json
 import pickle
-import numpy as np
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterator, Sequence
-from types import TracebackType
-from typing import Dict, List, Tuple, TypeAlias
-from pathlib import Path
-from multiprocessing import get_context
-import concurrent.futures
 from functools import cached_property
+from multiprocessing import get_context
+from pathlib import Path
+from types import TracebackType
+from typing import Self
+
+import numpy as np
 
 from findex.corpus import iter_documents
-from findex.tokenize import tokenize_text
 from findex.models import DocMeta
+from findex.tokenize import tokenize_text
 
-
-PostingLists: TypeAlias = dict[str, list[int]]
-PartialIndex: TypeAlias = dict[str, PostingLists]
-PartialResult: TypeAlias = tuple[PartialIndex, dict[int, DocMeta]]
+type PostingLists = dict[str, list[int]]
+type PartialIndex = dict[str, PostingLists]
+type PartialResult = tuple[PartialIndex, dict[int, DocMeta]]
 
 
 def _empty_postings() -> PostingLists:
@@ -30,8 +30,8 @@ class InvertedIndex:
 
     def __init__(self, keep_positions: bool = False) -> None:
         self.keep_positions = keep_positions
-        self.index: Dict[str, Dict[str, np.ndarray]] = {}
-        self.metadata: Dict[int, DocMeta] = {}
+        self.index: dict[str, dict[str, np.ndarray]] = {}
+        self.metadata: dict[int, DocMeta] = {}
         self.doc_lengths: np.ndarray = np.array([], dtype=np.int32)
 
     @property
@@ -44,7 +44,11 @@ class InvertedIndex:
         """Середня кількість токенів у документі."""
         if not self.metadata:
             return 0.0
-        return sum(meta.length for meta in self.metadata.values()) / self.num_docs
+
+        return (
+            sum(meta.length for meta in self.metadata.values())
+            / self.num_docs
+        )
 
     def doc_length(self, doc_id: int) -> int:
         """Довжина документа за його ID; KeyError для невідомого ID."""
@@ -55,7 +59,7 @@ class InvertedIndex:
         posting = self.index.get(term)
         return 0 if posting is None else len(posting["doc_ids"])
 
-    def __enter__(self) -> "InvertedIndex":
+    def __enter__(self) -> Self:
         """Дозволяє використовувати with open_index(path) as ix."""
         return self
 
@@ -78,7 +82,7 @@ class InvertedIndex:
         """Перевірка наявності терміна в індексі."""
         return term in self.index
 
-    def __getitem__(self, term: str) -> Dict[str, np.ndarray]:
+    def __getitem__(self, term: str) -> dict[str, np.ndarray]:
         """Повертає постинги терміна або викликає KeyError."""
         return self.index[term]
 
@@ -97,7 +101,9 @@ class InvertedIndex:
     def build(self, corpus_dir: str) -> None:
         """Послідовна побудова інвертованого індексу."""
 
-        temp_index: defaultdict[str, PostingLists] = defaultdict(_empty_postings)
+        temp_index: defaultdict[str, PostingLists] = defaultdict(
+            _empty_postings
+        )
 
         # Очищення попередніх даних перед новою індексацією
         self.index = {}
@@ -107,7 +113,8 @@ class InvertedIndex:
 
         # Генератор повертає об'єкти Document
         for doc_id, document in enumerate(
-            iter_documents(Path(corpus_dir)), start=1
+            iter_documents(Path(corpus_dir)),
+            start=1,
         ):
             filename = str(document.path)
             tokens = list(tokenize_text(document.text))
@@ -116,7 +123,7 @@ class InvertedIndex:
             self.metadata[doc_id] = DocMeta(
                 doc_id=doc_id,
                 filename=filename,
-                length=doc_len
+                length=doc_len,
             )
 
             counts = Counter(tokens)
@@ -129,11 +136,13 @@ class InvertedIndex:
         for term, data in temp_index.items():
             self.index[term] = {
                 "doc_ids": np.array(
-                    data["doc_ids"], dtype=np.int32
+                    data["doc_ids"],
+                    dtype=np.int32,
                 ),
                 "tfs": np.array(
-                    data["tfs"], dtype=np.int32
-                )
+                    data["tfs"],
+                    dtype=np.int32,
+                ),
             }
 
         # Формування масиву довжин документів
@@ -141,7 +150,8 @@ class InvertedIndex:
             max_id = max(self.metadata.keys())
 
             lengths_arr = np.zeros(
-                max_id + 1, dtype=np.int32
+                max_id + 1,
+                dtype=np.int32,
             )
 
             for doc_id, meta in self.metadata.items():
@@ -158,9 +168,9 @@ class InvertedIndex:
                     self.keep_positions,
                     self.metadata,
                     self.index,
-                    self.doc_lengths
+                    self.doc_lengths,
                 ),
-                f
+                f,
             )
 
     @classmethod
@@ -172,7 +182,7 @@ class InvertedIndex:
                 keep_positions,
                 metadata,
                 index_data,
-                doc_lengths
+                doc_lengths,
             ) = pickle.load(f)
 
         obj = cls(keep_positions=keep_positions)
@@ -188,7 +198,7 @@ class InvertedIndex:
         json_index = {
             term: {
                 "doc_ids": data["doc_ids"].tolist(),
-                "tfs": data["tfs"].tolist()
+                "tfs": data["tfs"].tolist(),
             }
             for term, data in self.index.items()
         }
@@ -199,24 +209,32 @@ class InvertedIndex:
                 str(doc_id): {
                     "doc_id": meta.doc_id,
                     "filename": meta.filename,
-                    "length": meta.length
+                    "length": meta.length,
                 }
                 for doc_id, meta in self.metadata.items()
             },
-            "index": json_index
+            "index": json_index,
         }
 
         with open(
-            filepath, "w", encoding="utf-8"
+            filepath,
+            "w",
+            encoding="utf-8",
         ) as f:
-            json.dump(data, f, ensure_ascii=False)
+            json.dump(
+                data,
+                f,
+                ensure_ascii=False,
+            )
 
     @classmethod
     def load_json(cls, filepath: str) -> "InvertedIndex":
         """Завантаження індексу з JSON."""
 
         with open(
-            filepath, "r", encoding="utf-8"
+            filepath,
+            "r",
+            encoding="utf-8",
         ) as f:
             data = json.load(f)
 
@@ -228,7 +246,7 @@ class InvertedIndex:
             int(k): DocMeta(
                 v["doc_id"],
                 v["filename"],
-                v["length"]
+                v["length"],
             )
             for k, v in data["metadata"].items()
         }
@@ -236,11 +254,13 @@ class InvertedIndex:
         obj.index = {
             term: {
                 "doc_ids": np.array(
-                    item["doc_ids"], dtype=np.int32
+                    item["doc_ids"],
+                    dtype=np.int32,
                 ),
                 "tfs": np.array(
-                    item["tfs"], dtype=np.int32
-                )
+                    item["tfs"],
+                    dtype=np.int32,
+                ),
             }
             for term, item in data["index"].items()
         }
@@ -249,7 +269,8 @@ class InvertedIndex:
             max_id = max(obj.metadata.keys())
 
             lengths_arr = np.zeros(
-                max_id + 1, dtype=np.int32
+                max_id + 1,
+                dtype=np.int32,
             )
 
             for doc_id, meta in obj.metadata.items():
@@ -272,18 +293,20 @@ def open_index(filepath: str) -> InvertedIndex:
 
 
 def build_partial(
-    file_paths: List[str],
+    file_paths: list[str],
     start_doc_id: int,
-    keep_positions: bool = False
-) -> Tuple[
-    Dict[str, Dict[str, List[int]]],
-    Dict[int, DocMeta]
+    keep_positions: bool = False,
+) -> tuple[
+    dict[str, dict[str, list[int]]],
+    dict[int, DocMeta],
 ]:
     """Побудова часткового індексу."""
 
-    local_index: defaultdict[str, PostingLists] = defaultdict(_empty_postings)
+    local_index: defaultdict[str, PostingLists] = defaultdict(
+        _empty_postings
+    )
 
-    local_metadata: Dict[int, DocMeta] = {}
+    local_metadata: dict[int, DocMeta] = {}
     doc_id = start_doc_id
 
     for fp in file_paths:
@@ -291,7 +314,7 @@ def build_partial(
 
         text = path.read_text(
             encoding="utf-8",
-            errors="ignore"
+            errors="ignore",
         )
 
         tokens = list(tokenize_text(text))
@@ -300,7 +323,7 @@ def build_partial(
         local_metadata[doc_id] = DocMeta(
             doc_id=doc_id,
             filename=str(path),
-            length=doc_len
+            length=doc_len,
         )
 
         counts = Counter(tokens)
@@ -314,7 +337,7 @@ def build_partial(
     serializable_index: PartialIndex = {
         term: {
             "doc_ids": data["doc_ids"],
-            "tfs": data["tfs"]
+            "tfs": data["tfs"],
         }
         for term, data in local_index.items()
     }
@@ -323,16 +346,18 @@ def build_partial(
 
 
 def merge(
-    partials: Sequence[PartialResult]
-) -> Tuple[
-    Dict[str, Dict[str, np.ndarray]],
-    Dict[int, DocMeta]
+    partials: Sequence[PartialResult],
+) -> tuple[
+    dict[str, dict[str, np.ndarray]],
+    dict[int, DocMeta],
 ]:
     """Об'єднання часткових індексів."""
 
-    merged_temp: defaultdict[str, PostingLists] = defaultdict(_empty_postings)
+    merged_temp: defaultdict[str, PostingLists] = defaultdict(
+        _empty_postings
+    )
 
-    merged_metadata: Dict[int, DocMeta] = {}
+    merged_metadata: dict[int, DocMeta] = {}
 
     for index_part, meta_part in partials:
         merged_metadata.update(meta_part)
@@ -349,11 +374,13 @@ def merge(
 
     for term, data in merged_temp.items():
         doc_ids = np.array(
-            data["doc_ids"], dtype=np.int32
+            data["doc_ids"],
+            dtype=np.int32,
         )
 
         tfs = np.array(
-            data["tfs"], dtype=np.int32
+            data["tfs"],
+            dtype=np.int32,
         )
 
         # Сортування постингів за doc_id
@@ -361,7 +388,7 @@ def merge(
 
         final_index[term] = {
             "doc_ids": doc_ids[sort_idx],
-            "tfs": tfs[sort_idx]
+            "tfs": tfs[sort_idx],
         }
 
     return final_index, merged_metadata
@@ -371,7 +398,7 @@ def build_index_parallel(
     corpus_dir: str,
     workers: int = 1,
     executor_type: str = "serial",
-    keep_positions: bool = False
+    keep_positions: bool = False,
 ) -> InvertedIndex:
     """Послідовна або паралельна побудова індексу."""
 
@@ -414,13 +441,13 @@ def build_index_parallel(
                 build_partial(
                     chunk_files,
                     start_id,
-                    keep_positions
+                    keep_positions,
                 )
             )
 
     elif executor_type == "threads":
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=workers
+            max_workers=workers,
         ) as executor:
 
             futures = [
@@ -428,7 +455,7 @@ def build_index_parallel(
                     build_partial,
                     cf,
                     sid,
-                    keep_positions
+                    keep_positions,
                 )
                 for cf, sid in chunks
             ]
@@ -443,7 +470,7 @@ def build_index_parallel(
 
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=workers,
-            mp_context=ctx
+            mp_context=ctx,
         ) as executor:
 
             futures = [
@@ -451,7 +478,7 @@ def build_index_parallel(
                     build_partial,
                     cf,
                     sid,
-                    keep_positions
+                    keep_positions,
                 )
                 for cf, sid in chunks
             ]
@@ -479,7 +506,8 @@ def build_index_parallel(
         max_id = max(metadata.keys())
 
         lengths_arr = np.zeros(
-            max_id + 1, dtype=np.int32
+            max_id + 1,
+            dtype=np.int32,
         )
 
         for doc_id, meta in metadata.items():

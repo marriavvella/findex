@@ -1,8 +1,6 @@
 
 import sys
 
-from collections import Counter
-
 from findex import stats
 
 

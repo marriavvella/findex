@@ -4,29 +4,44 @@ import tracemalloc
 from typing import List
 
 from findex.index import open_index, Index
-from findex.query_parser import parse_query, Term, Phrase, And, Or, Not
-from findex.scoring import BM25Scorer, TfIdfScorer, Scorer
-from findex.utils import timed, generate_snippet, cached_search_ids
+from findex.query_parser import (
+    parse_query,
+    Term,
+    Phrase,
+    And,
+    Or,
+    Not,
+)
+from findex.scoring import (
+    BM25Scorer,
+    TfIdfScorer,
+    Scorer,
+)
+from findex.utils import (
+    timed,
+    generate_snippet,
+    cached_search_ids,
+)
 from findex.models import SearchResult
 
 
 def extract_query_terms(node) -> List[str]:
-    """Витягує терміни з AST-дерева для ранжування та сніпетів."""
+    """Витягує терміни з AST для ранжування."""
 
     if isinstance(node, Term):
         return [node.term]
 
-    elif isinstance(node, Phrase):
+    if isinstance(node, Phrase):
         return node.tokens
 
-    elif isinstance(node, (And, Or)):
+    if isinstance(node, (And, Or)):
         return (
             extract_query_terms(node.left)
             + extract_query_terms(node.right)
         )
 
-    elif isinstance(node, Not):
-        return extract_query_terms(node.child)
+    if isinstance(node, Not):
+        return []
 
     return []
 
@@ -38,30 +53,33 @@ def execute_search(
     scorer: Scorer,
     top_k: int = 5
 ) -> List[SearchResult]:
-    """Виконує Boolean-пошук із ранжуванням результатів."""
+    """Виконує Boolean-пошук із ранжуванням."""
 
     if top_k < 1:
-        raise ValueError("top_k must be greater than zero")
+        raise ValueError(
+            "top_k must be greater than zero"
+        )
 
-    # 1. Розбираємо запит у дерево AST
-    ast_root = parse_query(query_str)
-
-    # 2. Знаходимо документи, які відповідають запиту
-    matching_docs = list(ast_root.evaluate(index))
+    # Отримуємо результати з кешу або обчислюємо їх
+    matching_docs = cached_search_ids(
+        index, query_str
+    )
 
     if not matching_docs:
         return []
 
-    # 3. Отримуємо терміни для ранжування
+    # Отримуємо терміни для ранжування
+    ast_root = parse_query(query_str)
     terms = extract_query_terms(ast_root)
 
-    # 4. Ранжуємо результати за BM25 або TF-IDF
-    results = scorer.score(index, terms, matching_docs)
+    # Ранжування BM25 або TF-IDF
+    results = scorer.score(
+        index,
+        terms,
+        matching_docs
+    )
 
-    # 5. Викликаємо функцію кешування
-    cached_search_ids(query_str, id(index))
-
-    # 6. Формуємо сніпети для знайдених документів
+    # Формування результатів зі сніпетами
     final_results: List[SearchResult] = []
 
     for res in results[:top_k]:
@@ -70,10 +88,12 @@ def execute_search(
                 res.filename,
                 "r",
                 encoding="utf-8"
-            ) as f:
-                content = f.read()
+            ) as file:
+                content = file.read()
 
-            snippet = generate_snippet(content, terms)
+            snippet = generate_snippet(
+                content, terms
+            )
 
         except (OSError, UnicodeError):
             snippet = "Текст недоступний"
@@ -94,19 +114,21 @@ def main() -> None:
     """Запускає пошук із командного рядка."""
 
     parser = argparse.ArgumentParser(
-        description="Ranked Boolean Search with Snippets"
+        description=(
+            "Ranked Boolean Search with Snippets"
+        )
     )
 
     parser.add_argument(
         "index_path",
         type=str,
-        help="Path to saved index file (.pkl or .json)"
+        help="Path to saved index (.pkl or .json)"
     )
 
     parser.add_argument(
         "query",
         type=str,
-        help="Search query, e.g. 'python AND (async OR await)'"
+        help="Search query"
     )
 
     parser.add_argument(
@@ -126,23 +148,21 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.top_k < 1:
-        parser.error("--top-k must be greater than zero")
+        parser.error(
+            "--top-k must be greater than zero"
+        )
 
-    # Починаємо вимірювання використання пам'яті
     tracemalloc.start()
 
     try:
-        # Завантажуємо індекс без використання with
         index = open_index(args.index_path)
 
-        # Вибираємо алгоритм ранжування
         scorer = (
             BM25Scorer()
             if args.scorer == "bm25"
             else TfIdfScorer()
         )
 
-        # Виконуємо пошук
         results = execute_search(
             index,
             args.query,
@@ -150,23 +170,25 @@ def main() -> None:
             top_k=args.top_k
         )
 
-        # Отримуємо пікове використання пам'яті
-        _, peak_mem = tracemalloc.get_traced_memory()
+        _, peak_mem = (
+            tracemalloc.get_traced_memory()
+        )
 
     finally:
         tracemalloc.stop()
 
     print(
         f"\nFound {len(results)} top results | "
-        f"Peak memory: {peak_mem / 1024 / 1024:.2f} MB\n"
+        f"Peak memory: "
+        f"{peak_mem / 1024 / 1024:.2f} MB\n"
     )
 
     for result in results:
         print(
             f"Score: {result.score:.4f} | "
-            f"[Doc {result.doc_id}] {result.filename}"
+            f"[Doc {result.doc_id}] "
+            f"{result.filename}"
         )
-
         print(f"Snippet: {result.snippet}\n")
 
 

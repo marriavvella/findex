@@ -1,31 +1,30 @@
 
 import re
 from pathlib import Path
-from typing import Set
 
 from findex.index import Index
 from findex.tokenize import tokenize
 
 
 class ASTNode:
-    def evaluate(self, index: Index) -> Set[int]:
+    def evaluate(self, index: Index) -> set[int]:
         raise NotImplementedError
 
-    def __and__(self, other):
+    def __and__(self, other: "ASTNode") -> "And":
         return And(self, other)
 
-    def __or__(self, other):
+    def __or__(self, other: "ASTNode") -> "Or":
         return Or(self, other)
 
-    def __invert__(self):
+    def __invert__(self) -> "Not":
         return Not(self)
 
 
 class Term(ASTNode):
-    def __init__(self, term: str):
+    def __init__(self, term: str) -> None:
         self.term = " ".join(tokenize(term))
 
-    def evaluate(self, index: Index) -> Set[int]:
+    def evaluate(self, index: Index) -> set[int]:
         postings = index.index.get(self.term)
 
         if postings is None:
@@ -36,32 +35,34 @@ class Term(ASTNode):
             for doc_id in postings["doc_ids"]
         }
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, Term)
             and self.term == other.term
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Term('{self.term}')"
 
 
 class Phrase(ASTNode):
-    def __init__(self, phrase: str):
-        self.tokens = list(tokenize(phrase))
+    def __init__(self, phrase: str) -> None:
+        self.tokens: list[str] = list(tokenize(phrase))
 
-    def evaluate(self, index: Index) -> Set[int]:
+    def evaluate(self, index: Index) -> set[int]:
         if not self.tokens:
             return set()
 
         # Відбираємо документи, які містять усі слова
-        candidates = Term(self.tokens[0]).evaluate(index)
+        candidates: set[int] = Term(
+            self.tokens[0]
+        ).evaluate(index)
 
         for token in self.tokens[1:]:
             candidates &= Term(token).evaluate(index)
 
         # Перевіряємо точний порядок слів
-        result = set()
+        result: set[int] = set()
         phrase_length = len(self.tokens)
 
         for doc_id in candidates:
@@ -89,88 +90,96 @@ class Phrase(ASTNode):
 
         return result
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, Phrase)
             and self.tokens == other.tokens
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Phrase({' '.join(self.tokens)})"
 
 
 class And(ASTNode):
-    def __init__(self, left: ASTNode, right: ASTNode):
+    def __init__(
+        self,
+        left: ASTNode,
+        right: ASTNode,
+    ) -> None:
         self.left = left
         self.right = right
 
-    def evaluate(self, index: Index) -> Set[int]:
+    def evaluate(self, index: Index) -> set[int]:
         return (
             self.left.evaluate(index)
             & self.right.evaluate(index)
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, And)
             and self.left == other.left
             and self.right == other.right
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"And({self.left}, {self.right})"
 
 
 class Or(ASTNode):
-    def __init__(self, left: ASTNode, right: ASTNode):
+    def __init__(
+        self,
+        left: ASTNode,
+        right: ASTNode,
+    ) -> None:
         self.left = left
         self.right = right
 
-    def evaluate(self, index: Index) -> Set[int]:
+    def evaluate(self, index: Index) -> set[int]:
         return (
             self.left.evaluate(index)
             | self.right.evaluate(index)
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, Or)
             and self.left == other.left
             and self.right == other.right
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Or({self.left}, {self.right})"
 
 
 class Not(ASTNode):
-    def __init__(self, child: ASTNode):
+    def __init__(self, child: ASTNode) -> None:
         self.child = child
 
-    def evaluate(self, index: Index) -> Set[int]:
+    def evaluate(self, index: Index) -> set[int]:
         return (
             set(index.metadata.keys())
             - self.child.evaluate(index)
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, Not)
             and self.child == other.child
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Not({self.child})"
 
 
 def parse_query(query: str) -> ASTNode:
-    tokens = re.findall(
+    tokens: list[str] = re.findall(
         r'"[^"]*"|\'[^\']*\'|\(|\)|AND\b|OR\b|NOT\b|[^\s()]+',
         query,
         flags=re.IGNORECASE,
     )
 
-    def parse_primary(pos):
+    def parse_primary(pos: int) -> tuple[ASTNode, int]:
         if pos >= len(tokens):
             return Term(""), pos
 
@@ -193,7 +202,7 @@ def parse_query(query: str) -> ASTNode:
 
         return Term(token), pos + 1
 
-    def parse_and(pos):
+    def parse_and(pos: int) -> tuple[ASTNode, int]:
         node, pos = parse_primary(pos)
 
         while pos < len(tokens):
@@ -210,7 +219,7 @@ def parse_query(query: str) -> ASTNode:
 
         return node, pos
 
-    def parse_or(pos):
+    def parse_or(pos: int) -> tuple[ASTNode, int]:
         node, pos = parse_and(pos)
 
         while (

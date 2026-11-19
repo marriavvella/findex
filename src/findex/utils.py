@@ -3,16 +3,29 @@ import time
 import functools
 import weakref
 import re
-from typing import List
 
+from collections.abc import Callable, Sequence
+from typing import ParamSpec, TypeVar
+
+from findex.index import Index
 from findex.query_parser import parse_query
 
 
-def timed(func):
+# Типи для декоратора, який зберігає сигнатуру функції.
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def timed(
+    func: Callable[P, R]
+) -> Callable[P, R]:
     """Декоратор для вимірювання часу виконання функції."""
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(
+        *args: P.args,
+        **kwargs: P.kwargs
+    ) -> R:
         t0 = time.perf_counter()
 
         result = func(*args, **kwargs)
@@ -29,14 +42,20 @@ def timed(func):
     return wrapper
 
 
+# Тип функції пошуку з LRU-кешем.
+SearchCache = Callable[[str], tuple[int, ...]]
+
 # Кеші прив'язані до окремих об'єктів індексу.
 # WeakKeyDictionary не утримує непотрібні індекси.
-_search_cache = weakref.WeakKeyDictionary()
+_search_cache: weakref.WeakKeyDictionary[
+    Index,
+    tuple[object, SearchCache]
+] = weakref.WeakKeyDictionary()
 
 CACHE_SIZE = 256
 
 
-def _create_cache(index):
+def _create_cache(index: Index) -> SearchCache:
     """
     Створює LRU-кеш для конкретного індексу.
 
@@ -44,10 +63,12 @@ def _create_cache(index):
     утримувати об'єкт індексу в пам'яті.
     """
 
-    index_ref = weakref.ref(index)
+    index_ref: weakref.ReferenceType[Index] = (
+        weakref.ref(index)
+    )
 
     @functools.lru_cache(maxsize=CACHE_SIZE)
-    def search(query_str: str):
+    def search(query_str: str) -> tuple[int, ...]:
         current_index = index_ref()
 
         if current_index is None:
@@ -62,7 +83,10 @@ def _create_cache(index):
     return search
 
 
-def cached_search_ids(index, query_str: str) -> List[int]:
+def cached_search_ids(
+    index: Index,
+    query_str: str
+) -> list[int]:
     """
     Повертає ID документів із використанням LRU-кешу.
 
@@ -84,11 +108,16 @@ def cached_search_ids(index, query_str: str) -> List[int]:
     else:
         search = state[1]
 
-    hits_before = search.cache_info().hits
+    # Для типізованої функції Callable метод cache_info()
+    # не визначений. Використовуємо cache_info через
+    # окремий протокол нижче.
+    cache_info = getattr(search, "cache_info")
+
+    hits_before: int = cache_info().hits
 
     doc_ids = search(query_str)
 
-    hits_after = search.cache_info().hits
+    hits_after: int = cache_info().hits
 
     if hits_after > hits_before:
         print(f"[CACHE HIT] {query_str}")
@@ -100,7 +129,7 @@ def cached_search_ids(index, query_str: str) -> List[int]:
 
 def generate_snippet(
     text: str,
-    query_terms: List[str],
+    query_terms: Sequence[str],
     window: int = 80
 ) -> str:
     """
@@ -119,7 +148,7 @@ def generate_snippet(
         )
 
     # Видаляємо порожні та повторювані терміни.
-    terms = list(
+    terms: list[str] = list(
         dict.fromkeys(
             term.strip()
             for term in query_terms
@@ -138,7 +167,7 @@ def generate_snippet(
 
     # Формуємо регулярний вираз для пошуку цілих слів.
     # Довші терміни перевіряємо першими.
-    escaped_terms = [
+    escaped_terms: list[str] = [
         re.escape(term)
         for term in sorted(
             terms,

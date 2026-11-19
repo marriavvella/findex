@@ -3,7 +3,9 @@ import json
 import pickle
 import numpy as np
 from collections import defaultdict, Counter
-from typing import Dict, List, Tuple
+from collections.abc import Iterator, Sequence
+from types import TracebackType
+from typing import Dict, List, Tuple, TypeAlias
 from pathlib import Path
 from multiprocessing import get_context
 import concurrent.futures
@@ -14,10 +16,19 @@ from findex.tokenize import tokenize_text
 from findex.models import DocMeta
 
 
+PostingLists: TypeAlias = dict[str, list[int]]
+PartialIndex: TypeAlias = dict[str, PostingLists]
+PartialResult: TypeAlias = tuple[PartialIndex, dict[int, DocMeta]]
+
+
+def _empty_postings() -> PostingLists:
+    return {"doc_ids": [], "tfs": []}
+
+
 class InvertedIndex:
     """Інвертований індекс із використанням NumPy-масивів."""
 
-    def __init__(self, keep_positions: bool = False):
+    def __init__(self, keep_positions: bool = False) -> None:
         self.keep_positions = keep_positions
         self.index: Dict[str, Dict[str, np.ndarray]] = {}
         self.metadata: Dict[int, DocMeta] = {}
@@ -48,7 +59,12 @@ class InvertedIndex:
         """Дозволяє використовувати with open_index(path) as ix."""
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
         """Файли закриті в load_pickle/load_json; винятки не приховуємо."""
         return False
 
@@ -66,7 +82,7 @@ class InvertedIndex:
         """Повертає постинги терміна або викликає KeyError."""
         return self.index[term]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         """Ітерація за термінами індексу."""
         return iter(self.index)
 
@@ -78,12 +94,10 @@ class InvertedIndex:
             f"terms={len(self.index)})"
         )
 
-    def build(self, corpus_dir: str):
+    def build(self, corpus_dir: str) -> None:
         """Послідовна побудова інвертованого індексу."""
 
-        temp_index = defaultdict(
-            lambda: {"doc_ids": [], "tfs": []}
-        )
+        temp_index: defaultdict[str, PostingLists] = defaultdict(_empty_postings)
 
         # Очищення попередніх даних перед новою індексацією
         self.index = {}
@@ -135,7 +149,7 @@ class InvertedIndex:
 
             self.doc_lengths = lengths_arr
 
-    def save_pickle(self, filepath: str):
+    def save_pickle(self, filepath: str) -> None:
         """Збереження індексу у форматі Pickle."""
 
         with open(filepath, "wb") as f:
@@ -168,7 +182,7 @@ class InvertedIndex:
 
         return obj
 
-    def save_json(self, filepath: str):
+    def save_json(self, filepath: str) -> None:
         """Збереження індексу у форматі JSON."""
 
         json_index = {
@@ -267,9 +281,7 @@ def build_partial(
 ]:
     """Побудова часткового індексу."""
 
-    local_index = defaultdict(
-        lambda: {"doc_ids": [], "tfs": []}
-    )
+    local_index: defaultdict[str, PostingLists] = defaultdict(_empty_postings)
 
     local_metadata: Dict[int, DocMeta] = {}
     doc_id = start_doc_id
@@ -299,7 +311,7 @@ def build_partial(
 
         doc_id += 1
 
-    serializable_index = {
+    serializable_index: PartialIndex = {
         term: {
             "doc_ids": data["doc_ids"],
             "tfs": data["tfs"]
@@ -311,16 +323,14 @@ def build_partial(
 
 
 def merge(
-    partials
+    partials: Sequence[PartialResult]
 ) -> Tuple[
     Dict[str, Dict[str, np.ndarray]],
     Dict[int, DocMeta]
 ]:
     """Об'єднання часткових індексів."""
 
-    merged_temp = defaultdict(
-        lambda: {"doc_ids": [], "tfs": []}
-    )
+    merged_temp: defaultdict[str, PostingLists] = defaultdict(_empty_postings)
 
     merged_metadata: Dict[int, DocMeta] = {}
 
@@ -335,7 +345,7 @@ def merge(
                 data["tfs"]
             )
 
-    final_index = {}
+    final_index: dict[str, dict[str, np.ndarray]] = {}
 
     for term, data in merged_temp.items():
         doc_ids = np.array(
@@ -383,7 +393,7 @@ def build_index_parallel(
 
     chunk_size = max(1, len(files) // workers)
 
-    chunks = []
+    chunks: list[tuple[list[str], int]] = []
     current_id = 1
 
     for i in range(0, len(files), chunk_size):
@@ -396,7 +406,7 @@ def build_index_parallel(
 
             current_id += len(chunk_files)
 
-    partials = []
+    partials: list[PartialResult] = []
 
     if executor_type == "serial":
         for chunk_files, start_id in chunks:

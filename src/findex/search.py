@@ -1,10 +1,10 @@
 
 import argparse
 import tracemalloc
-from typing import List
 
 from findex.index import open_index, Index
 from findex.query_parser import (
+    ASTNode,
     parse_query,
     Term,
     Phrase,
@@ -25,7 +25,7 @@ from findex.utils import (
 from findex.models import SearchResult
 
 
-def extract_query_terms(node) -> List[str]:
+def extract_query_terms(node: ASTNode) -> list[str]:
     """Витягує терміни з AST для ранжування."""
 
     if isinstance(node, Term):
@@ -51,8 +51,8 @@ def execute_search(
     index: Index,
     query_str: str,
     scorer: Scorer,
-    top_k: int = 5
-) -> List[SearchResult]:
+    top_k: int = 5,
+) -> list[SearchResult]:
     """Виконує Boolean-пошук із ранжуванням."""
 
     if top_k < 1:
@@ -80,7 +80,7 @@ def execute_search(
     )
 
     # Формування результатів зі сніпетами
-    final_results: List[SearchResult] = []
+    final_results: list[SearchResult] = []
 
     for res in results[:top_k]:
         try:
@@ -157,7 +157,7 @@ def main() -> None:
     try:
         index = open_index(args.index_path)
 
-        scorer = (
+        scorer: Scorer = (
             BM25Scorer()
             if args.scorer == "bm25"
             else TfIdfScorer()

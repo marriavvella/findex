@@ -42,7 +42,10 @@ def test_search_with_bm25(sample_index):
     )
 
     assert len(results) == 2
-    assert all(result.doc_id in (1, 3) for result in results)
+    assert {result.filename.split("/")[-1].split("\\")[-1] for result in results} == {
+        "doc1.txt",
+        "doc3.txt",
+    }
     assert all(result.score >= 0 for result in results)
 
 
@@ -57,7 +60,10 @@ def test_search_with_tfidf(sample_index):
     )
 
     assert len(results) == 2
-    assert all(result.doc_id in (1, 3) for result in results)
+    assert {result.filename.split("/")[-1].split("\\")[-1] for result in results} == {
+        "doc1.txt",
+        "doc3.txt",
+    }
 
 
 def test_search_top_k(sample_index):

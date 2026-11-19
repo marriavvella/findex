@@ -1,0 +1,34 @@
+{
+    "alice": [
+        1
+    ],
+    "wonderland": [
+        1
+    ],
+    "rabbit": [
+        1
+    ],
+    "queen": [
+        1,
+        6
+    ],
+    "king": [
+        1,
+        6
+    ],
+    "cat": [
+        1
+    ],
+    "garden": [
+        1
+    ],
+    "tea": [
+        1
+    ],
+    "alice AND rabbit": [
+        1
+    ],
+    "\"alice in wonderland\"": [
+        1
+    ]
+}

@@ -1,0 +1,21 @@
+﻿query,scorer,retrieved_doc_ids,relevant_doc_ids,precision_at_5
+alice,BM25,1 5 7,1,0.2000
+alice,TF-IDF,1 5 7,1,0.2000
+wonderland,BM25,1,1,0.2000
+wonderland,TF-IDF,1,1,0.2000
+rabbit,BM25,1 5 2,1,0.2000
+rabbit,TF-IDF,1 2 5,1,0.2000
+queen,BM25,1 6 7 3 4,1 6,0.4000
+queen,TF-IDF,1 6 3 7 4,1 6,0.4000
+king,BM25,1 6 3 5 7,1 6,0.4000
+king,TF-IDF,1 6 3 5 2,1 6,0.4000
+cat,BM25,1 2 4 5 7,1,0.2000
+cat,TF-IDF,1 2 4 3 5,1,0.2000
+garden,BM25,1 7 5 4 6,1,0.2000
+garden,TF-IDF,1 4 7 5 6,1,0.2000
+tea,BM25,1 7 2 5 3,1,0.2000
+tea,TF-IDF,1 7 2 3 5,1,0.2000
+alice AND rabbit,BM25,1 5,1,0.2000
+alice AND rabbit,TF-IDF,1 5,1,0.2000
+"""alice in wonderland""",BM25,,1,0.0000
+"""alice in wonderland""",TF-IDF,,1,0.0000

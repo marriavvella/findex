@@ -1,6 +1,8 @@
 
 import re
+from pathlib import Path
 from typing import Set
+
 from findex.index import Index
 from findex.tokenize import tokenize
 
@@ -25,12 +27,20 @@ class Term(ASTNode):
 
     def evaluate(self, index: Index) -> Set[int]:
         postings = index.index.get(self.term)
+
         if postings is None:
             return set()
-        return {int(doc_id) for doc_id in postings["doc_ids"]}
+
+        return {
+            int(doc_id)
+            for doc_id in postings["doc_ids"]
+        }
 
     def __eq__(self, other):
-        return isinstance(other, Term) and self.term == other.term
+        return (
+            isinstance(other, Term)
+            and self.term == other.term
+        )
 
     def __repr__(self):
         return f"Term('{self.term}')"
@@ -44,18 +54,46 @@ class Phrase(ASTNode):
         if not self.tokens:
             return set()
 
-        # Поточний індекс зберігає doc_ids і tfs,
-        # але не позиції слів.
-        # Тому поки шукаємо документи, що містять усі слова.
-        result = Term(self.tokens[0]).evaluate(index)
+        # Відбираємо документи, які містять усі слова
+        candidates = Term(self.tokens[0]).evaluate(index)
 
         for token in self.tokens[1:]:
-            result &= Term(token).evaluate(index)
+            candidates &= Term(token).evaluate(index)
+
+        # Перевіряємо точний порядок слів
+        result = set()
+        phrase_length = len(self.tokens)
+
+        for doc_id in candidates:
+            filename = index.metadata[doc_id].filename
+
+            try:
+                with Path(filename).open(
+                    "r", encoding="utf-8"
+                ) as file:
+                    document_tokens = list(
+                        tokenize(file.read())
+                    )
+            except (OSError, UnicodeError):
+                continue
+
+            for i in range(
+                len(document_tokens) - phrase_length + 1
+            ):
+                if (
+                    document_tokens[i:i + phrase_length]
+                    == self.tokens
+                ):
+                    result.add(doc_id)
+                    break
 
         return result
 
     def __eq__(self, other):
-        return isinstance(other, Phrase) and self.tokens == other.tokens
+        return (
+            isinstance(other, Phrase)
+            and self.tokens == other.tokens
+        )
 
     def __repr__(self):
         return f"Phrase({' '.join(self.tokens)})"
@@ -63,10 +101,14 @@ class Phrase(ASTNode):
 
 class And(ASTNode):
     def __init__(self, left: ASTNode, right: ASTNode):
-        self.left, self.right = left, right
+        self.left = left
+        self.right = right
 
     def evaluate(self, index: Index) -> Set[int]:
-        return self.left.evaluate(index) & self.right.evaluate(index)
+        return (
+            self.left.evaluate(index)
+            & self.right.evaluate(index)
+        )
 
     def __eq__(self, other):
         return (
@@ -81,10 +123,14 @@ class And(ASTNode):
 
 class Or(ASTNode):
     def __init__(self, left: ASTNode, right: ASTNode):
-        self.left, self.right = left, right
+        self.left = left
+        self.right = right
 
     def evaluate(self, index: Index) -> Set[int]:
-        return self.left.evaluate(index) | self.right.evaluate(index)
+        return (
+            self.left.evaluate(index)
+            | self.right.evaluate(index)
+        )
 
     def __eq__(self, other):
         return (
@@ -102,10 +148,16 @@ class Not(ASTNode):
         self.child = child
 
     def evaluate(self, index: Index) -> Set[int]:
-        return set(index.metadata.keys()) - self.child.evaluate(index)
+        return (
+            set(index.metadata.keys())
+            - self.child.evaluate(index)
+        )
 
     def __eq__(self, other):
-        return isinstance(other, Not) and self.child == other.child
+        return (
+            isinstance(other, Not)
+            and self.child == other.child
+        )
 
     def __repr__(self):
         return f"Not({self.child})"
@@ -130,8 +182,10 @@ def parse_query(query: str) -> ASTNode:
 
         if token == "(":
             node, pos = parse_or(pos + 1)
+
             if pos < len(tokens) and tokens[pos] == ")":
                 pos += 1
+
             return node, pos
 
         if token.startswith(('"', "'")):
@@ -159,7 +213,10 @@ def parse_query(query: str) -> ASTNode:
     def parse_or(pos):
         node, pos = parse_and(pos)
 
-        while pos < len(tokens) and tokens[pos].upper() == "OR":
+        while (
+            pos < len(tokens)
+            and tokens[pos].upper() == "OR"
+        ):
             right, pos = parse_and(pos + 1)
             node = Or(node, right)
 

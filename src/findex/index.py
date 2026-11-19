@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple
 from pathlib import Path
 from multiprocessing import get_context
 import concurrent.futures
+from functools import cached_property
 
 from findex.corpus import iter_documents
 from findex.tokenize import tokenize_text
@@ -22,6 +23,61 @@ class InvertedIndex:
         self.metadata: Dict[int, DocMeta] = {}
         self.doc_lengths: np.ndarray = np.array([], dtype=np.int32)
 
+    @property
+    def num_docs(self) -> int:
+        """Кількість документів в індексі."""
+        return len(self.metadata)
+
+    @cached_property
+    def avg_doc_length(self) -> float:
+        """Середня кількість токенів у документі."""
+        if not self.metadata:
+            return 0.0
+        return sum(meta.length for meta in self.metadata.values()) / self.num_docs
+
+    def doc_length(self, doc_id: int) -> int:
+        """Довжина документа за його ID; KeyError для невідомого ID."""
+        return self.metadata[doc_id].length
+
+    def df(self, term: str) -> int:
+        """Кількість документів, що містять термін."""
+        posting = self.index.get(term)
+        return 0 if posting is None else len(posting["doc_ids"])
+
+    def __enter__(self) -> "InvertedIndex":
+        """Дозволяє використовувати with open_index(path) as ix."""
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        """Файли закриті в load_pickle/load_json; винятки не приховуємо."""
+        return False
+
+    # Спеціальні методи Python — лабораторна №3
+
+    def __len__(self) -> int:
+        """Кількість унікальних термінів в індексі."""
+        return len(self.index)
+
+    def __contains__(self, term: str) -> bool:
+        """Перевірка наявності терміна в індексі."""
+        return term in self.index
+
+    def __getitem__(self, term: str) -> Dict[str, np.ndarray]:
+        """Повертає постинги терміна або викликає KeyError."""
+        return self.index[term]
+
+    def __iter__(self):
+        """Ітерація за термінами індексу."""
+        return iter(self.index)
+
+    def __repr__(self) -> str:
+        """Текстове представлення індексу."""
+        return (
+            f"InvertedIndex("
+            f"documents={len(self.metadata)}, "
+            f"terms={len(self.index)})"
+        )
+
     def build(self, corpus_dir: str):
         """Послідовна побудова інвертованого індексу."""
 
@@ -33,6 +89,7 @@ class InvertedIndex:
         self.index = {}
         self.metadata = {}
         self.doc_lengths = np.array([], dtype=np.int32)
+        self.__dict__.pop("avg_doc_length", None)
 
         # Генератор повертає об'єкти Document
         for doc_id, document in enumerate(

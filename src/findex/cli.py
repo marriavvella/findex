@@ -1,4 +1,4 @@
-
+﻿
 import asyncio
 import json
 import logging
@@ -10,10 +10,11 @@ from typing import Annotated, Literal, NoReturn
 import typer
 import uvicorn
 from rich.console import Console
+from rich.live import Live
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from findex.crawler import crawl_site
+from findex.crawler import CrawlStats, crawl_site
 from findex.index import InvertedIndex, build_index_parallel, open_index
 from findex.scoring import BM25Scorer, Scorer, TfIdfScorer
 
@@ -67,8 +68,14 @@ def create_index(
     executor_type: ExecutorName = "serial",
 ) -> None:
     """Build and save an inverted index with progress indication."""
-    if not corpus_dir.is_dir():
-        fail("Corpus directory not found.")
+    if not corpus_dir.exists():
+       fail("Corpus directory not found.")
+
+    if corpus_dir.is_file() and corpus_dir.suffix.lower() != ".jsonl":
+        fail("Corpus file must have a .jsonl extension.")
+
+    if not corpus_dir.is_dir() and not corpus_dir.is_file():
+        fail("Corpus path must be a directory or a JSONL file.")
 
     if out.suffix.lower() not in (".pkl", ".json"):
         fail("Output must be .pkl or .json.")
@@ -86,12 +93,15 @@ def create_index(
     ) as progress:
         progress.add_task("Building index...", total=None)
 
-        if executor_type == "serial" and workers == 1:
-            # Preserve the original lab-4 sequential build path.
+        if corpus_dir.is_file():
+            # JSONL is read lazily by iter_documents().
+            # Keep indexing outside the asyncio event loop.
+            index = InvertedIndex()
+            index.build(str(corpus_dir))
+        elif executor_type == "serial" and workers == 1:
             index = InvertedIndex()
             index.build(str(corpus_dir))
         else:
-            # Worker exceptions propagate with their original traceback.
             index = build_index_parallel(
                 str(corpus_dir),
                 workers=workers,
@@ -120,7 +130,7 @@ def create_index(
 def index_command(
     corpus_dir: Annotated[
         Path,
-        typer.Argument(help="Directory containing corpus documents"),
+        typer.Argument(help="Corpus directory or JSONL file"),
     ],
     out: Annotated[
         Path,
@@ -155,7 +165,7 @@ def index_command(
 def build(
     corpus_dir: Annotated[
         Path,
-        typer.Argument(help="Directory containing corpus documents"),
+        typer.Argument(help="Corpus directory or JSONL file"),
     ],
     out: Annotated[
         Path,
@@ -236,6 +246,7 @@ def search(
         fail(f"Cannot load index: {exc}")
 
     scorer_name = scorer.lower()
+
     if scorer_name not in ("bm25", "tfidf"):
         fail("Scorer must be bm25 or tfidf.")
 
@@ -329,8 +340,8 @@ def stats(
     table.add_column("Value", justify="right")
 
     table.add_row(f"Documents: {documents}", str(documents))
-    table.add_row(f"Unique terms: {terms}", str(terms))
-    table.add_row(f"Total tokens: {total_tokens}", str(total_tokens))
+    table.add_row("Unique terms:", str(terms))
+    table.add_row("Total tokens:", str(total_tokens))
     table.add_row("Total postings", str(total_postings))
     table.add_row(
         "Average document length",
@@ -342,6 +353,49 @@ def stats(
     )
 
     console.print(table)
+
+
+def make_crawl_table(
+    stats: CrawlStats,
+    max_pages: int,
+    concurrency: int,
+) -> Table:
+    """Build a Rich table with current crawler statistics."""
+    table = Table(title="Findex Async Crawler")
+
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", justify="right")
+
+    table.add_row(
+        "Pages collected",
+        f"{stats.pages}/{max_pages}",
+    )
+    table.add_row(
+        "Elapsed time",
+        f"{stats.elapsed:.2f} s",
+    )
+    table.add_row(
+        "Pages per second",
+        f"{stats.pages_per_second:.2f}",
+    )
+    table.add_row(
+        "Active requests",
+        str(stats.active_requests),
+    )
+    table.add_row(
+        "Queue depth",
+        str(stats.queue_depth),
+    )
+    table.add_row(
+        "Errors",
+        str(stats.errors),
+    )
+    table.add_row(
+        "Concurrency limit",
+        str(concurrency),
+    )
+
+    return table
 
 
 @app.command()
@@ -373,66 +427,162 @@ def crawl(
             "--concurrency",
             "-c",
             min=1,
-            help="Concurrency level",
+            help="Global concurrency limit",
         ),
     ] = 5,
+    per_host_concurrency: Annotated[
+        int,
+        typer.Option(
+            "--per-host-concurrency",
+            min=1,
+            help="Maximum concurrent requests per host",
+        ),
+    ] = 2,
+    host_delay: Annotated[
+        float,
+        typer.Option(
+            "--host-delay",
+            min=0.0,
+            help="Minimum delay between requests to one host",
+        ),
+    ] = 0.2,
+    log_file: Annotated[
+        Path,
+        typer.Option(
+            "--log-file",
+            help="Path for crawler HTTP log",
+        ),
+    ] = Path("crawl.log"),
 ) -> None:
-    """Run async web crawler and save pages to JSONL."""
+    """Run asynchronous crawler and save pages to JSONL."""
     console.print(
         f"[bold cyan]Starting crawler for {start_url} "
         f"(max_pages={max_pages}, concurrency={concurrency})"
         f"[/bold cyan]"
     )
 
+    stats = CrawlStats()
+
+    crawler_logger = logging.getLogger("findex.crawler")
+    previous_level = crawler_logger.level
+
+    file_handler: logging.FileHandler | None = None
+
+    try:
+        log_file.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        file_handler = logging.FileHandler(
+            log_file,
+            mode="w",
+            encoding="utf-8",
+        )
+
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s | %(levelname)s | %(message)s"
+            )
+        )
+
+        crawler_logger.addHandler(file_handler)
+        crawler_logger.setLevel(logging.INFO)
+
+    except OSError as exc:
+        fail(f"Cannot create crawler log: {exc}")
+
     async def run() -> None:
         start = time.perf_counter()
 
         try:
+            out_jsonl.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
             await asyncio.to_thread(
                 out_jsonl.write_text,
                 "",
                 encoding="utf-8",
             )
+
         except OSError as exc:
             fail(f"Cannot create output file: {exc}")
 
-        async for page in crawl_site(
-            start_url,
-            max_pages=max_pages,
-            concurrency=concurrency,
-        ):
-            line = json.dumps(
-                {
-                    "doc_id": page["doc_id"],
-                    "filename": page["url"],
-                    "text": page["html"],
-                },
-                ensure_ascii=False,
-            ) + "\n"
+        try:
+            with Live(
+                make_crawl_table(
+                    stats,
+                    max_pages,
+                    concurrency,
+                ),
+                console=console,
+                refresh_per_second=4,
+                transient=False,
+            ) as live:
+                async for page in crawl_site(
+                    start_url,
+                    max_pages=max_pages,
+                    concurrency=concurrency,
+                    per_host_concurrency=per_host_concurrency,
+                    host_delay=host_delay,
+                    stats=stats,
+                ):
+                    line = json.dumps(
+                        {
+                            "doc_id": page["doc_id"],
+                            "filename": page["url"],
+                            "text": page["html"],
+                        },
+                        ensure_ascii=False,
+                    ) + "\n"
 
-            try:
-                await asyncio.to_thread(
-                    append_line,
-                    out_jsonl,
-                    line,
+                    await asyncio.to_thread(
+                        append_line,
+                        out_jsonl,
+                        line,
+                    )
+
+                    live.update(
+                        make_crawl_table(
+                            stats,
+                            max_pages,
+                            concurrency,
+                        )
+                    )
+
+                live.update(
+                    make_crawl_table(
+                        stats,
+                        max_pages,
+                        concurrency,
+                    )
                 )
-            except OSError as exc:
-                fail(f"Cannot write output file: {exc}")
 
-            console.print(
-                f"[{page['doc_id']}/{max_pages}] "
-                f"Collected: {page['url']}"
-            )
+        except OSError as exc:
+            fail(f"Cannot write crawler output: {exc}")
 
         elapsed = time.perf_counter() - start
 
         console.print(
-            f"[bold green]Crawled successfully "
-            f"in {elapsed:.2f}s. "
-            f"Saved to {out_jsonl}[/bold green]"
+            f"[bold green]Crawler finished in "
+            f"{elapsed:.2f} seconds.[/bold green]"
         )
+        console.print(f"Pages collected: {stats.pages}")
+        console.print(f"Errors: {stats.errors}")
+        console.print(f"Output: {out_jsonl}")
+        console.print(f"Log: {log_file}")
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        if file_handler is not None:  # pyright: ignore[reportUnnecessaryComparison]
+            crawler_logger.removeHandler(file_handler)
+            file_handler.close()
+
+        crawler_logger.setLevel(previous_level)
 
 
 def append_line(path: Path, line: str) -> None:

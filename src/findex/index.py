@@ -2,6 +2,7 @@
 import concurrent.futures
 import json
 import pickle
+import time
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Sequence
 from functools import cached_property
@@ -33,6 +34,7 @@ class InvertedIndex:
         self.index: dict[str, dict[str, np.ndarray]] = {}
         self.metadata: dict[int, DocMeta] = {}
         self.doc_lengths: np.ndarray = np.array([], dtype=np.int32)
+        self.merge_seconds: float = 0.0
 
     @property
     def num_docs(self) -> int:
@@ -493,7 +495,9 @@ def build_index_parallel(
             f"Unknown executor type: {executor_type}"
         )
 
+    merge_started = time.perf_counter()
     index_data, metadata = merge(partials)
+    merge_seconds = time.perf_counter() - merge_started
 
     idx = InvertedIndex(
         keep_positions=keep_positions
@@ -501,6 +505,7 @@ def build_index_parallel(
 
     idx.index = index_data
     idx.metadata = metadata
+    idx.merge_seconds = merge_seconds
 
     if metadata:
         max_id = max(metadata.keys())

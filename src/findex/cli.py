@@ -14,14 +14,16 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from findex.crawler import crawl_site
-from findex.index import InvertedIndex, open_index
+from findex.index import InvertedIndex, build_index_parallel, open_index
 from findex.scoring import BM25Scorer, Scorer, TfIdfScorer
 
 app = typer.Typer(help="Findex - Python search engine CLI")
 console = Console()
 error_console = Console(stderr=True)
+logger = logging.getLogger(__name__)
 
 ScorerName = Literal["bm25", "tfidf"]
+ExecutorName = Literal["serial", "threads", "processes"]
 
 
 @app.callback()
@@ -58,7 +60,12 @@ def fail(message: str) -> NoReturn:
     raise typer.Exit(code=1)
 
 
-def create_index(corpus_dir: Path, out: Path) -> None:
+def create_index(
+    corpus_dir: Path,
+    out: Path,
+    workers: int = 1,
+    executor_type: ExecutorName = "serial",
+) -> None:
     """Build and save an inverted index with progress indication."""
     if not corpus_dir.is_dir():
         fail("Corpus directory not found.")
@@ -66,7 +73,9 @@ def create_index(corpus_dir: Path, out: Path) -> None:
     if out.suffix.lower() not in (".pkl", ".json"):
         fail("Output must be .pkl or .json.")
 
-    index = InvertedIndex()
+    if workers < 1:
+        fail("Workers must be at least 1.")
+
     start = time.perf_counter()
 
     with Progress(
@@ -76,7 +85,18 @@ def create_index(corpus_dir: Path, out: Path) -> None:
         transient=True,
     ) as progress:
         progress.add_task("Building index...", total=None)
-        index.build(str(corpus_dir))
+
+        if executor_type == "serial" and workers == 1:
+            # Preserve the original lab-4 sequential build path.
+            index = InvertedIndex()
+            index.build(str(corpus_dir))
+        else:
+            # Worker exceptions propagate with their original traceback.
+            index = build_index_parallel(
+                str(corpus_dir),
+                workers=workers,
+                executor_type=executor_type,
+            )
 
     try:
         if out.suffix.lower() == ".json":
@@ -93,6 +113,7 @@ def create_index(corpus_dir: Path, out: Path) -> None:
     console.print(f"Unique terms: {len(index.index)}")
     console.print(f"Saved to: {out}")
     console.print(f"Elapsed: {elapsed:.3f} seconds")
+    logger.info("Executor: %s; workers: %d", executor_type, workers)
 
 
 @app.command("index")
@@ -109,9 +130,25 @@ def index_command(
             help="Output index file (.pkl or .json)",
         ),
     ] = Path("index.pkl"),
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            "-w",
+            min=1,
+            help="Number of workers",
+        ),
+    ] = 1,
+    executor_type: Annotated[
+        ExecutorName,
+        typer.Option(
+            "--executor",
+            help="serial, threads or processes",
+        ),
+    ] = "serial",
 ) -> None:
     """Build and save an inverted index."""
-    create_index(corpus_dir, out)
+    create_index(corpus_dir, out, workers, executor_type)
 
 
 @app.command("build")
@@ -128,9 +165,25 @@ def build(
             help="Output index file (.pkl or .json)",
         ),
     ] = Path("index.pkl"),
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            "-w",
+            min=1,
+            help="Number of workers",
+        ),
+    ] = 1,
+    executor_type: Annotated[
+        ExecutorName,
+        typer.Option(
+            "--executor",
+            help="serial, threads or processes",
+        ),
+    ] = "serial",
 ) -> None:
     """Build an index (legacy command)."""
-    create_index(corpus_dir, out)
+    create_index(corpus_dir, out, workers, executor_type)
 
 
 @app.command()

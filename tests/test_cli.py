@@ -1,4 +1,5 @@
 
+import json
 
 import pytest
 from typer.testing import CliRunner
@@ -238,3 +239,54 @@ def test_cli_help():
     assert "stats" in result.output
     assert "crawl" in result.output
     assert "serve" in result.output
+
+
+def test_cli_index_success(corpus, tmp_path):
+    """Перевіряє нову команду index."""
+
+    output = tmp_path / "new_index.pkl"
+
+    result = runner.invoke(
+        app,
+        ["index", str(corpus), "--out", str(output)],
+    )
+
+    assert result.exit_code == 0
+    assert "Index built successfully!" in result.output
+    assert output.exists()
+
+
+def test_cli_search_json(saved_index):
+    """Перевіряє JSON-формат результатів пошуку."""
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            "apple",
+            "--index",
+            str(saved_index),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    data = json.loads(result.stdout)
+
+    assert data["query"] == "apple"
+    assert data["scorer"] == "bm25"
+    assert len(data["results"]) == 1
+    assert data["results"][0]["doc_id"] == 1
+
+
+def test_cli_verbose_help():
+    """Перевіряє підтримку параметра -v."""
+
+    result = runner.invoke(
+        app,
+        ["-v", "--help"],
+    )
+
+    assert result.exit_code == 0
+    assert "search" in result.output

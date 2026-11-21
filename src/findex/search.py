@@ -73,11 +73,10 @@ def execute_search(
     terms = extract_query_terms(ast_root)
 
     # Ранжування BM25 або TF-IDF
-    results = scorer.score(
-        index,
-        terms,
-        matching_docs
-    )
+    if isinstance(scorer, (BM25Scorer, TfIdfScorer)):
+        results = scorer.score(index, terms, matching_docs, top_k=top_k)
+    else:
+        results = scorer.score(index, terms, matching_docs)
 
     # Формування результатів зі сніпетами
     final_results: list[SearchResult] = []

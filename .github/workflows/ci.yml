@@ -5,9 +5,11 @@ on:
   push:
     branches:
       - lab-02-08
+      - lab-08
   pull_request:
     branches:
       - lab-02-08
+      - lab-08
 
 jobs:
   test:
@@ -37,3 +39,6 @@ jobs:
 
       - name: Run tests with coverage
         run: uv run pytest --cov=findex --cov-report=term-missing
+
+      - name: Run benchmark smoke tests
+        run: uv run pytest benchmarks/test_benchmark_lab08.py --benchmark-min-rounds=3 --benchmark-disable-gc

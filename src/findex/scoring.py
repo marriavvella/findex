@@ -1,11 +1,15 @@
 
-import heapq
+"""Vectorized BM25 and TF-IDF with stable legacy-compatible ranking."""
+
 import math
 from collections.abc import Sequence
 from typing import Literal, Protocol
 
+import numpy as np
+
 from findex.index import Index
 from findex.models import SearchResult
+
 
 ScorerType = Literal["tf-idf", "tfidf", "bm25"]
 
@@ -16,8 +20,199 @@ class Scorer(Protocol):
         index: Index,
         query_terms: Sequence[str],
         matching_docs: Sequence[int],
+        top_k: int | None = None,
     ) -> list[SearchResult]:
         ...
+
+
+def _score(
+    index: Index,
+    query_terms: Sequence[str],
+    matching_docs: Sequence[int],
+    *,
+    method: str,
+    top_k: int | None = None,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> list[SearchResult]:
+    """Calculate vectorized scores and return stable ranking."""
+
+    ids = np.asarray(
+        list(dict.fromkeys(int(i) for i in matching_docs)),
+        dtype=np.int32,
+    )
+
+    n = len(index.metadata)
+
+    if not n or len(ids) == 0:
+        return []
+
+    if top_k is not None and top_k < 1:
+        raise ValueError("top_k must be greater than zero")
+
+    scores = np.zeros(len(ids), dtype=np.float64)
+
+    # Sort IDs only for efficient vectorized membership checks.
+    order = np.argsort(ids)
+    sorted_ids = ids[order]
+
+    lengths = index.doc_lengths
+
+    if len(lengths) <= int(ids.max()):
+        lengths = np.zeros(
+            int(ids.max()) + 1,
+            dtype=np.int32,
+        )
+
+        for doc_id, meta in index.metadata.items():
+            lengths[doc_id] = meta.length
+
+    avgdl = max(
+        sum(meta.length for meta in index.metadata.values()) / n,
+        1.0,
+    )
+
+    for term in query_terms:
+        postings = index.index.get(term)
+
+        if postings is None:
+            continue
+
+        posting_ids = np.asarray(
+            postings["doc_ids"],
+            dtype=np.int32,
+        )
+
+        tf = np.asarray(
+            postings["tfs"],
+            dtype=np.float64,
+        )
+
+        df = len(posting_ids)
+
+        if df == 0:
+            continue
+
+        positions = np.searchsorted(
+            sorted_ids,
+            posting_ids,
+        )
+
+        in_bounds = positions < len(sorted_ids)
+
+        valid = np.zeros(
+            len(posting_ids),
+            dtype=bool,
+        )
+
+        valid[in_bounds] = (
+            sorted_ids[positions[in_bounds]]
+            == posting_ids[in_bounds]
+        )
+
+        if not np.any(valid):
+            continue
+
+        doc_ids = posting_ids[valid]
+        tf = tf[valid]
+
+        dest = order[positions[valid]]
+
+        doc_lengths = lengths[doc_ids].astype(
+            np.float64
+        )
+
+        if method == "tfidf":
+            idf = (
+                math.log((n + 1) / (df + 0.5))
+                + 1.0
+            )
+
+            values = (
+                tf / np.maximum(doc_lengths, 1.0)
+            ) * idf
+
+        else:
+            idf = math.log(
+                (n - df + 0.5) / (df + 0.5) + 1.0
+            )
+
+            denominator = (
+                tf
+                + k1
+                * (
+                    1.0
+                    - b
+                    + b * doc_lengths / avgdl
+                )
+            )
+
+            values = np.divide(
+                idf * tf * (k1 + 1),
+                denominator,
+                out=np.zeros_like(tf),
+                where=denominator > 0,
+            )
+
+        np.add.at(scores, dest, values)
+
+    rounded = np.round(scores, 4)
+
+    # Preserve the original input order for equal scores.
+    if top_k is not None and top_k < len(rounded):
+
+        # Use argpartition to determine the top-k threshold.
+        partitioned = np.argpartition(
+            -rounded,
+            top_k - 1,
+        )
+
+        cutoff = rounded[
+            partitioned[top_k - 1]
+        ]
+
+        # Include every document above the threshold.
+        above = np.flatnonzero(
+            rounded > cutoff
+        )
+
+        # Equal-score documents retain their original order.
+        equal = np.flatnonzero(
+            rounded == cutoff
+        )
+
+        remaining = top_k - len(above)
+
+        candidates = np.concatenate(
+            (
+                above,
+                equal[:remaining],
+            )
+        )
+
+        # Stable sorting restores ranking and tie order.
+        ranked = candidates[
+            np.argsort(
+                -rounded[candidates],
+                kind="stable",
+            )
+        ]
+
+    else:
+        ranked = np.argsort(
+            -rounded,
+            kind="stable",
+        )
+
+    return [
+        SearchResult(
+            score=float(rounded[i]),
+            doc_id=int(ids[i]),
+            filename=index.metadata[int(ids[i])].filename,
+            snippet="",
+        )
+        for i in ranked
+    ]
 
 
 class TfIdfScorer:
@@ -26,55 +221,14 @@ class TfIdfScorer:
         index: Index,
         query_terms: Sequence[str],
         matching_docs: Sequence[int],
+        top_k: int | None = None,
     ) -> list[SearchResult]:
-
-        scores: dict[int, float] = {
-            int(doc_id): 0.0 for doc_id in matching_docs
-        }
-
-        N = len(index.metadata)
-
-        if N == 0:
-            return []
-
-        for term in query_terms:
-            postings = index.index.get(term)
-
-            if postings is None:
-                continue
-
-            doc_ids = postings["doc_ids"]
-            tfs = postings["tfs"]
-
-            df = len(doc_ids)
-
-            if df == 0:
-                continue
-
-            idf = math.log((N + 1) / (df + 0.5)) + 1.0
-
-            for doc_id, tf_value in zip(doc_ids, tfs):
-                doc_id = int(doc_id)
-
-                if doc_id in scores:
-                    doc_len = index.metadata[doc_id].length
-                    tf = int(tf_value) / max(doc_len, 1)
-                    scores[doc_id] += tf * idf
-
-        results = [
-            SearchResult(
-                score=round(score, 4),
-                doc_id=doc_id,
-                filename=index.metadata[doc_id].filename,
-                snippet="",
-            )
-            for doc_id, score in scores.items()
-        ]
-
-        return heapq.nlargest(
-            len(results),
-            results,
-            key=lambda result: result.score,
+        return _score(
+            index,
+            query_terms,
+            matching_docs,
+            method="tfidf",
+            top_k=top_k,
         )
 
 
@@ -92,74 +246,16 @@ class BM25Scorer:
         index: Index,
         query_terms: Sequence[str],
         matching_docs: Sequence[int],
+        top_k: int | None = None,
     ) -> list[SearchResult]:
-
-        scores: dict[int, float] = {
-            int(doc_id): 0.0 for doc_id in matching_docs
-        }
-
-        N = len(index.metadata)
-
-        if N == 0:
-            return []
-
-        avgdl = (
-            sum(meta.length for meta in index.metadata.values()) / N
-        )
-
-        avgdl = max(avgdl, 1.0)
-
-        for term in query_terms:
-            postings = index.index.get(term)
-
-            if postings is None:
-                continue
-
-            doc_ids = postings["doc_ids"]
-            tfs = postings["tfs"]
-
-            df = len(doc_ids)
-
-            if df == 0:
-                continue
-
-            idf = math.log(
-                (N - df + 0.5) / (df + 0.5) + 1.0
-            )
-
-            for doc_id, tf_value in zip(doc_ids, tfs):
-                doc_id = int(doc_id)
-
-                if doc_id in scores:
-                    doc_len = index.metadata[doc_id].length
-                    tf = int(tf_value)
-
-                    numerator = tf * (self.k1 + 1)
-
-                    denominator = tf + self.k1 * (
-                        1 - self.b
-                        + self.b * (doc_len / avgdl)
-                    )
-
-                    if denominator > 0:
-                        scores[doc_id] += (
-                            idf * numerator / denominator
-                        )
-
-        results = [
-            SearchResult(
-                score=round(score, 4),
-                doc_id=doc_id,
-                filename=index.metadata[doc_id].filename,
-                snippet="",
-            )
-            for doc_id, score in scores.items()
-        ]
-
-        return heapq.nlargest(
-            len(results),
-            results,
-            key=lambda result: result.score,
+        return _score(
+            index,
+            query_terms,
+            matching_docs,
+            method="bm25",
+            top_k=top_k,
+            k1=self.k1,
+            b=self.b,
         )
 
 

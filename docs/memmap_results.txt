@@ -1,0 +1,7 @@
+10x corpus documents: 2000
+Terms: 15
+Build time ms: 99.919
+Memmap open ms: 10.597
+Numpy file bytes: 240128
+Corpus bytes: 523540
+Note: memmap is a separate benchmark artifact; main CLI still uses pickle.

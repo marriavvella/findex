@@ -1,4 +1,3 @@
-
 import logging
 import re
 import uuid
@@ -97,7 +96,7 @@ def create_snippet(text: str, query: str, length: int = 220) -> str:
             position = max(0, match.start() - 60)
             break
 
-    snippet = text[position:position + length].replace("\n", " ")
+    snippet = text[position : position + length].replace("\n", " ")
     snippet = re.sub(r"\s+", " ", snippet).strip()
 
     if position > 0:
@@ -133,9 +132,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-templates = Jinja2Templates(
-    directory=str(Path(__file__).parent / "templates")
-)
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 def get_index(request: Request) -> InvertedIndex:
@@ -149,16 +146,12 @@ def get_index(request: Request) -> InvertedIndex:
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    request_id = request.headers.get(
-        "X-Request-ID", str(uuid.uuid4())
-    )
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
     try:
         response = await call_next(request)
     except Exception:
-        logger.exception(
-            "Unhandled exception request_id=%s", request_id
-        )
+        logger.exception("Unhandled exception request_id=%s", request_id)
         response = JSONResponse(
             status_code=500,
             content={
@@ -203,7 +196,7 @@ def search(
     )
 
     start = (page - 1) * k
-    selected = ranked[start:start + k]
+    selected = ranked[start : start + k]
 
     results = []
 

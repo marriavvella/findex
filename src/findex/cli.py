@@ -1,4 +1,3 @@
-﻿
 import asyncio
 import json
 import logging
@@ -69,7 +68,7 @@ def create_index(
 ) -> None:
     """Build and save an inverted index with progress indication."""
     if not corpus_dir.exists():
-       fail("Corpus directory not found.")
+        fail("Corpus directory not found.")
 
     if corpus_dir.is_file() and corpus_dir.suffix.lower() != ".jsonl":
         fail("Corpus file must have a .jsonl extension.")
@@ -250,9 +249,7 @@ def search(
     if scorer_name not in ("bm25", "tfidf"):
         fail("Scorer must be bm25 or tfidf.")
 
-    ranking: Scorer = (
-        BM25Scorer() if scorer_name == "bm25" else TfIdfScorer()
-    )
+    ranking: Scorer = BM25Scorer() if scorer_name == "bm25" else TfIdfScorer()
 
     results = execute_search(
         index,
@@ -276,9 +273,7 @@ def search(
             ],
         }
 
-        sys.stdout.write(
-            json.dumps(payload, ensure_ascii=False) + "\n"
-        )
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
         return
 
     table = Table(title=f"Search results: {query}")
@@ -322,18 +317,11 @@ def stats(
     documents = len(index.metadata)
     terms = len(index.index)
 
-    total_tokens = sum(
-        meta.length for meta in index.metadata.values()
-    )
+    total_tokens = sum(meta.length for meta in index.metadata.values())
 
-    total_postings = sum(
-        len(data["doc_ids"])
-        for data in index.index.values()
-    )
+    total_postings = sum(len(data["doc_ids"]) for data in index.index.values())
 
-    average_length = (
-        total_tokens / documents if documents else 0.0
-    )
+    average_length = total_tokens / documents if documents else 0.0
 
     table = Table(title="Findex Statistics")
     table.add_column("Metric")
@@ -482,9 +470,7 @@ def crawl(
 
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s | %(levelname)s | %(message)s"
-            )
+            logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
         )
 
         crawler_logger.addHandler(file_handler)
@@ -530,14 +516,17 @@ def crawl(
                     host_delay=host_delay,
                     stats=stats,
                 ):
-                    line = json.dumps(
-                        {
-                            "doc_id": page["doc_id"],
-                            "filename": page["url"],
-                            "text": page["html"],
-                        },
-                        ensure_ascii=False,
-                    ) + "\n"
+                    line = (
+                        json.dumps(
+                            {
+                                "doc_id": page["doc_id"],
+                                "filename": page["url"],
+                                "text": page["html"],
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
 
                     await asyncio.to_thread(
                         append_line,
@@ -567,8 +556,7 @@ def crawl(
         elapsed = time.perf_counter() - start
 
         console.print(
-            f"[bold green]Crawler finished in "
-            f"{elapsed:.2f} seconds.[/bold green]"
+            f"[bold green]Crawler finished in {elapsed:.2f} seconds.[/bold green]"
         )
         console.print(f"Pages collected: {stats.pages}")
         console.print(f"Errors: {stats.errors}")

@@ -616,7 +616,7 @@ def serve(
     """Start FastAPI web server via uvicorn."""
     uvicorn.run(
         "findex.web.app:app",
-        host="127.0.0.1",
+        host=__import__("os").environ.get("HOST", "0.0.0.0"),
         port=port,
         workers=workers,
         reload=False,

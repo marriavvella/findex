@@ -1,3 +1,29 @@
+# Findex 0.7.0 — лабораторна №7
+
+**Публічна адреса:** очікує розгортання на Render (вписати фактичний URL після деплою).
+
+## Запуск
+
+```bash
+uv sync
+$env:INDEX_PATH="index.pkl"  # PowerShell
+uv run findex serve --port 8000 --workers 1
+```
+
+Відкрийте http://127.0.0.1:8000/ — вебпошук, http://127.0.0.1:8000/docs — Swagger API.
+
+API: `GET /search?q=python&k=5&scorer=bm25&page=1`, `GET /docs/{doc_id}`, `GET /stats`, `GET /health`.
+
+Тести: `uv run pytest tests/test_web.py -q`.
+
+Docker: `docker build -t findex:0.7.0 .` та `docker run --rm -p 8000:8000 -e INDEX_PATH=/app/index.pkl findex:0.7.0`.
+
+Render: New → Blueprint → підключити репозиторій і файл `render.yaml`, після деплою вписати URL вище. Платформа перевіряє `/health`.
+
+Вимірювання навантаження: `benchmarks/lab07_oha.md`. Числа заповнюються тільки після реальних запусків `oha`.
+
+---
+
 
 
 **# Findex — пошукова система на Python**

@@ -1,197 +1,105 @@
-
 import logging
+import re
 import uuid
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import (
-    Depends,
-    FastAPI,
-    HTTPException,
-    Query,
-    Request,
-)
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from findex.index import InvertedIndex
-from findex.scoring import (
-    BM25Scorer,
-    Scorer,
-    TfIdfScorer,
-)
+from findex.scoring import BM25Scorer, TfIdfScorer
 from findex.search import execute_search
 from findex.web.config import settings
 
 logger = logging.getLogger("findex.web")
 
+class Hit(BaseModel):
+    doc_id: int
+    filename: str
+    score: float
+    snippet: str = ""
 
-# Сховище моделей із чітко визначеним типом.
-ml_models: dict[str, InvertedIndex | None] = {}
+class SearchResponse(BaseModel):
+    query: str
+    page: int
+    k: int
+    total: int
+    results: list[Hit]
 
+class DocumentResponse(BaseModel):
+    doc_id: int
+    filename: str
+    text: str
+
+class StatsResponse(BaseModel):
+    total_terms: int
+    total_documents: int
+
+class HealthResponse(BaseModel):
+    status: str
 
 @asynccontextmanager
-async def lifespan(
-    _app: FastAPI,
-) -> AsyncGenerator[None, None]:
-    """Завантажує індекс під час запуску вебсервера."""
-
-    idx_path = Path(settings.index_path)
-
-    if idx_path.exists():
-        ml_models["index"] = InvertedIndex.load_pickle(
-            str(idx_path)
-        )
-    else:
-        ml_models["index"] = None
-
+async def lifespan(app: FastAPI):
+    path = Path(settings.index_path)
+    app.state.index = None
+    if path.is_file():
+        try:
+            app.state.index = InvertedIndex.load_pickle(str(path))
+            logger.info("Index loaded from %s", path)
+        except Exception:
+            logger.exception("Unable to load index from %s", path)
     yield
+    app.state.index = None
 
-    ml_models.clear()
+app = FastAPI(title="Findex Web API", version="0.7.0", lifespan=lifespan)
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
-
-app = FastAPI(
-    title="Findex Web API",
-    lifespan=lifespan,
-)
-
-templates = Jinja2Templates(
-    directory="src/findex/web/templates"
-)
-
-
-def get_index() -> InvertedIndex:
-    """Повертає завантажений індекс."""
-
-    idx = ml_models.get("index")
-
+def get_index(request: Request) -> InvertedIndex:
+    idx = getattr(request.app.state, "index", None)
     if idx is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Index not loaded",
-        )
-
+        raise HTTPException(status_code=503, detail="Index not loaded")
     return idx
 
-
-@app.get("/health")
-def health(
-    _idx: InvertedIndex = Depends(get_index),
-) -> dict[str, str]:
-    """Перевіряє доступність пошукової системи."""
-
-    return {"status": "ok"}
-
-
-@app.get("/stats")
-def stats(
-    idx: InvertedIndex = Depends(get_index),
-) -> dict[str, int]:
-    """Повертає статистику індексу."""
-
-    return {
-        "total_terms": len(idx.index),
-        "total_documents": len(idx.metadata),
-    }
-
-
-@app.get("/search")
-async def search(
-    q: str = Query(..., min_length=1),
-    k: int = Query(5, ge=1, le=50),
-    scorer_name: Literal["bm25", "tfidf"] = "bm25",
-    page: int = Query(1, ge=1),
-    idx: InvertedIndex = Depends(get_index),
-) -> dict[str, object]:
-    """Виконує пошук із ранжуванням та пагінацією."""
-
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     try:
-        scorer: Scorer = (
-            BM25Scorer()
-            if scorer_name == "bm25"
-            else TfIdfScorer()
-        )
+        response = await call_next(request)
+    except Exception:
+        logger.exception("Unhandled exception request_id=%s", request_id)
+        response = JSONResponse(status_code=500, content={"detail": "Internal Server Error", "request_id": request_id})
+    response.headers["X-Request-ID"] = request_id
+    return response
 
-        results = execute_search(
-            idx,
-            q,
-            scorer,
-            top_k=k * page,
-        )
+@app.get("/health", response_model=HealthResponse)
+def health(idx: InvertedIndex = Depends(get_index)):
+    return HealthResponse(status="ok")
 
-        # Проста пагінація.
-        start = (page - 1) * k
-        paginated = results[start:start + k]
+@app.get("/stats", response_model=StatsResponse)
+def stats(idx: InvertedIndex = Depends(get_index)):
+    return StatsResponse(total_terms=len(idx.index), total_documents=len(idx.metadata))
 
-        return {
-            "query": q,
-            "page": page,
-            "results": [
-                {
-                    "doc_id": result.doc_id,
-                    "score": result.score,
-                    "filename": result.filename,
-                }
-                for result in paginated
-            ],
-        }
+@app.get("/search", response_model=SearchResponse)
+def search(q: str = Query(min_length=1, max_length=300), k: int = Query(5, ge=1, le=50), scorer: Literal["bm25", "tfidf"] = "bm25", page: int = Query(1, ge=1, le=10000), idx: InvertedIndex = Depends(get_index)):
+    # CPU-bound search runs in FastAPI's thread pool rather than on the event loop.
+    ranker = BM25Scorer() if scorer == "bm25" else TfIdfScorer()
+    ranked = execute_search(idx, q, ranker, top_k=max(1, len(idx.metadata)))
+    start = (page - 1) * k
+    return SearchResponse(query=q, page=page, k=k, total=len(ranked), results=[Hit(doc_id=r.doc_id, filename=r.filename, score=r.score, snippet=r.snippet) for r in ranked[start:start+k]])
 
-    except Exception as exc:
-        req_id = uuid.uuid4()
-
-        logger.exception(
-            "Search request failed. Req ID: %s",
-            req_id,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal Server Error (ID: {req_id})",
-        ) from exc
-
-
-@app.get("/docs/{doc_id}")
-def get_doc(
-    doc_id: int,
-    idx: InvertedIndex = Depends(get_index),
-) -> dict[str, int | str]:
-    """Повертає вміст документа за його ідентифікатором."""
-
+@app.get("/docs/{doc_id}", response_model=DocumentResponse)
+def get_doc(doc_id: int, idx: InvertedIndex = Depends(get_index)):
     meta = idx.metadata.get(doc_id)
-
     if meta is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Document not found",
-        )
-
-    # Читаємо вміст файлу документа.
-    doc_path = Path(meta.filename)
-
-    text = (
-        doc_path.read_text(
-            encoding="utf-8",
-            errors="ignore",
-        )
-        if doc_path.exists()
-        else "File not found on disk."
-    )
-
-    return {
-        "doc_id": meta.doc_id,
-        "filename": meta.filename,
-        "text": text,
-    }
-
+        raise HTTPException(status_code=404, detail="Document not found")
+    path = Path(meta.filename)
+    content = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else "Текст документа відсутній на сервері."
+    return DocumentResponse(doc_id=meta.doc_id, filename=meta.filename, text=content)
 
 @app.get("/", response_class=HTMLResponse)
-def index_page(request: Request) -> HTMLResponse:
-    """Повертає головну HTML-сторінку."""
-
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {},
-    )
+def home(request: Request):
+    return templates.TemplateResponse(request, "index.html", {})
